@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 2 backend-only regression + new-feature testing of Wolf's Mind gestionale against the public preview URL. Rewrote /app/backend/tests/backend_test.py (42 pytest tests) for the refactored API: numero_tessera on tesserato, president_signature_base64/logo on organizzazione, TipoPacchetto.esclude_da_compensi, ricevuta attribution (emesso_per_id) + movimento sync, RicevutaItem.esclude_da_compensi compensi math, physical DELETE ricevuta with counter decrement/number reuse, lezioni collettive with partecipanti[], /abbonamenti/{id}/storico, /movimenti/riepilogo-mensile, dashboard admin vs tecnico scoping, PDF auth (cookie 200 / anon 401) and bilancio PDF, email with PDF attachment, RBAC. Result: 40/42 passed (95%). All requested functional flows PASS. 2 failures: brute-force lockout never triggers behind the ingress (real defect), and legacy tipi_pacchetto docs are returned without the esclude_da_compensi field.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/login", "issue": "Brute-force lockout does NOT work in practice. Counter key is f'{request.client.host}:{email}' and the k8s ingress presents several client IPs (observed 10.49.134.130 and 10.49.134.134 for 6 consecutive attempts -> counts 2 and 4), so the >=5 threshold is never reached. 6 wrong passwords all returned 401. Key the counter on email only (optionally + X-Forwarded-For first hop) and add a TTL index on login_attempts.", "priority": "HIGH"},
+      {"endpoint": "GET /api/tipi-pacchetto", "issue": "Documents created before the new flag are returned WITHOUT 'esclude_da_compensi' (e.g. '1 lezione', 'Donazione'), so the frontend receives undefined instead of false. Add a default in the response projection or run a one-off migration ($set esclude_da_compensi:false where missing)."},
+      {"endpoint": "GET /api/ricevute/{id}/pdf, /report/bilancio/pdf, /ricevute/{id}/send-email", "issue": "500 Internal Server Error when organizzazione.logo_base64 / president_signature_base64 contains base64 that decodes but is a corrupt image stream (reportlab raises 'broken data stream when reading image file' during doc.build; _image_from_b64 only guards the constructor, not the lazy decode). Validate the bytes eagerly (PIL Image.open+verify) inside the try, so a bad upload degrades gracefully instead of breaking every PDF/email."},
+      {"endpoint": "DELETE /api/abbonamenti/{id}", "issue": "No cascade: lezioni still reference the deleted abbonamento inside partecipanti[], leaving orphan participants (previous single-abbonamento model deleted the lessons). Same for DELETE /api/tesserati (abbonamenti/ricevute/lezioni not cleaned)."},
+      {"endpoint": "DELETE /api/ricevute/{id}", "issue": "Response field numero_riutilizzabile is `counter and counter.get('seq')==seq`, which yields null (not false) when the year counter document is missing. Coerce to bool."},
+      {"endpoint": "PATCH /api/tesserati/{id}, /api/tipi-pacchetto/{id}, /api/movimenti/{id}", "issue": "Updates filter out None values, so a field can never be cleared (e.g. removing numero_tessera or scadenza_visita_medica is impossible via the API)."},
+      {"endpoint": "CORS (infra note)", "issue": "App-level CORS is now correct (echoes https://multi-tech-associate.preview.emergentagent.com with allow-credentials, verified on port 8001), but the k8s ingress rewrites Access-Control-Allow-Origin to '*' on the public URL. Not an app bug; no action unless cross-origin cookie auth is needed."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Fix login lockout keying (email-based, not request.client.host) - currently no brute-force protection at all behind the ingress",
+    "Backfill/default esclude_da_compensi on existing tipi_pacchetto documents",
+    "Harden _image_from_b64 to validate image bytes so a corrupt logo/signature cannot 500 all PDF endpoints",
+    "Consider cascade cleanup of lezioni partecipanti on abbonamento/tesserato delete"
+  ],
+  "critical_code_review_comments": [
+    "server.py is 858 lines - split into routers (auth/users, tesserati/abbonamenti/lezioni, ricevute, contabilita/report).",
+    "@app.on_event('startup'/'shutdown') is deprecated - migrate to lifespan.",
+    "Ricevuta counter is now incremented after tesserato validation (iteration-1 gap fixed) - verified no number burn on 404.",
+    "serialize() strips _id/password_hash - verified no leaks in every tested response, including /abbonamenti/{id}/storico nested docs.",
+    "Date filters compare 'YYYY-MM-DD' against ISO timestamps lexicographically (date_to + 'T23:59:59'); works but fragile - consider normalized storage.",
+    "PDF signature verified programmatically: receipt with president_signature_base64+logo embeds 4 image XObjects and is larger than the no-image version; bilancio PDF renders title and 'Periodo:' as separate flowables with a 4mm Spacer (no overlap possible)."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "95% (40/42)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "All ephemeral and cleaned up by fixtures: tecnico users test_tec_<hex>@example.com, tesserati TEST_Rossi/TEST_Bianchi, temporary abbonamenti/lezioni/ricevute/movimenti/tipo-pacchetto. login_attempts was cleared before the run. organizzazione was left with a VALID 120x40 PNG in logo_base64 and president_signature_base64 (test data - main agent may want to clear or replace with the real logo/signature).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "admin@wolfsmind.it / Admin2026! (works, bcrypt hash verified $2b$, httpOnly access_token+refresh_token cookies set on login)",
+  "context_for_next_testing_agent": "Run serially: cd /app/backend && python -m pytest tests/backend_test.py -q -n 0 (pytest.ini forces -n 2 --dist loadscope; -n 0 avoids cross-class receipt-numbering races - do NOT edit pytest.ini). Only 2 tests fail: TestAuth::test_brute_force_lockout (real defect, IP-keyed counter) and TestTipiPacchetto::test_list_not_empty_and_shape (legacy docs missing esclude_da_compensi). If PDF tests 500, check organizzazione.logo_base64/president_signature_base64 for a corrupt base64 image - reset with db.organizzazione.update_one({'_id':'config'},{'$set':{'logo_base64':None,'president_signature_base64':None}}). Clear login_attempts before re-running auth tests. Email test hits real Resend with delivered@resend.dev and returned a valid email_id. Frontend has never been tested.",
+  "rca_of_the_issue": "Lockout: server.py login() builds ident = f'{request.client.host}:{email}'. Behind the Kubernetes ingress each request can arrive from a different proxy pod IP, so failed attempts are spread across multiple counter documents and none reaches the 5-attempt threshold (verified directly in the login_attempts collection). PDF 500: reportlab's RLImage decodes lazily at doc.build(), so _image_from_b64's try/except around the constructor does not catch corrupt image streams; every receipt PDF / email / bilancio PDF then fails with 500 until the stored image is fixed."
+}

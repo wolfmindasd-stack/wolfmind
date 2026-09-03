@@ -1,42 +1,69 @@
 import React, { useEffect, useState } from "react";
-import { api, fmtEur, fmtDate, formatApiErrorDetail, todayIso, API } from "../lib/api";
+import { api, fmtEur, fmtDate, formatApiErrorDetail, todayIso } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Plus, Trash2, Download, Mail, MessageCircle, FileText, Eye } from "lucide-react";
+import { Plus, Trash2, Download, Mail, MessageCircle, Eye, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../lib/auth";
 
-const emptyItem = { descrizione: "", num_lezioni: "", importo: 0 };
+const emptyItem = { descrizione: "", num_lezioni: "", importo: 0,
+                    tipo_pacchetto_id: "", esclude_da_compensi: false };
+
+async function fetchPdfBlob(rid) {
+  const res = await api.get(`/ricevute/${rid}/pdf`, { responseType: "blob" });
+  return res.data;
+}
 
 export default function Ricevute() {
   const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [list, setList] = useState([]);
   const [tesserati, setTesserati] = useState([]);
   const [tipi, setTipi] = useState([]);
+  const [tecnici, setTecnici] = useState([]);
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [emailOpen, setEmailOpen] = useState(false);
   const [selectedRid, setSelectedRid] = useState(null);
   const [emailTo, setEmailTo] = useState("");
   const [emailMessage, setEmailMessage] = useState("");
   const [form, setForm] = useState({
-    tesserato_id: "", data: todayIso(),
-    metodo_pagamento: "Contanti", items: [{ ...emptyItem }], note: "",
+    tesserato_id: "", data: todayIso(), metodo_pagamento: "Contanti",
+    items: [{ ...emptyItem }], note: "", emesso_per_id: "",
   });
 
   const load = async () => {
-    const [r, t, p] = await Promise.all([
-      api.get("/ricevute"), api.get("/tesserati"), api.get("/tipi-pacchetto"),
+    const [r, t, p, u] = await Promise.all([
+      api.get("/ricevute"), api.get("/tesserati"),
+      api.get("/tipi-pacchetto"), api.get("/users").catch(() => ({ data: [] })),
     ]);
     setList(r.data); setTesserati(t.data); setTipi(p.data);
+    setTecnici(u.data.filter((x) => x.role === "tecnico" && x.active !== false));
   };
   useEffect(() => { load(); }, []);
 
   const openNew = () => {
+    setEditingId(null);
     setForm({ tesserato_id: "", data: todayIso(), metodo_pagamento: "Contanti",
-              items: [{ ...emptyItem }], note: "" });
+              items: [{ ...emptyItem }], note: "", emesso_per_id: "" });
+    setOpen(true);
+  };
+
+  const openEdit = (r) => {
+    setEditingId(r.id);
+    setForm({
+      tesserato_id: r.tesserato_id, data: (r.data || "").slice(0, 10),
+      metodo_pagamento: r.metodo_pagamento || "Contanti",
+      items: r.items.map((i) => ({
+        descrizione: i.descrizione, num_lezioni: i.num_lezioni ?? "",
+        importo: i.importo, tipo_pacchetto_id: i.tipo_pacchetto_id || "",
+        esclude_da_compensi: !!i.esclude_da_compensi,
+      })),
+      note: r.note || "", emesso_per_id: r.emesso_per_id || "",
+    });
     setOpen(true);
   };
 
@@ -49,7 +76,8 @@ export default function Ricevute() {
     const t = tipi.find((x) => x.id === tipoId);
     if (t) updateItem(i, {
       descrizione: t.nome, num_lezioni: t.num_lezioni ?? "",
-      importo: t.prezzo_default,
+      importo: t.prezzo_default, tipo_pacchetto_id: t.id,
+      esclude_da_compensi: !!t.esclude_da_compensi,
     });
   };
 
@@ -61,64 +89,76 @@ export default function Ricevute() {
       toast.error("Compila descrizione e importo per ogni riga"); return;
     }
     try {
-      const payload = { ...form, items: form.items.map((i) => ({
-        descrizione: i.descrizione,
-        num_lezioni: i.num_lezioni === "" ? null : Number(i.num_lezioni),
-        importo: Number(i.importo),
-      }))};
-      await api.post("/ricevute", payload);
-      toast.success("Ricevuta creata");
+      const payload = {
+        ...form,
+        emesso_per_id: form.emesso_per_id || null,
+        items: form.items.map((i) => ({
+          descrizione: i.descrizione,
+          num_lezioni: i.num_lezioni === "" ? null : Number(i.num_lezioni),
+          importo: Number(i.importo),
+          tipo_pacchetto_id: i.tipo_pacchetto_id || null,
+          esclude_da_compensi: !!i.esclude_da_compensi,
+        })),
+      };
+      if (editingId) {
+        await api.patch(`/ricevute/${editingId}`, payload);
+        toast.success("Ricevuta aggiornata");
+      } else {
+        await api.post("/ricevute", payload);
+        toast.success("Ricevuta creata");
+      }
       setOpen(false); load();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
 
   const downloadPdf = async (r) => {
     try {
-      const res = await api.get(`/ricevute/${r.id}/pdf`, { responseType: "blob" });
-      const url = URL.createObjectURL(res.data);
+      const blob = await fetchPdfBlob(r.id);
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = `Ricevuta_${r.numero.replace("/", "-")}.pdf`;
       a.click(); URL.revokeObjectURL(url);
     } catch (e) { toast.error("Errore download PDF"); }
   };
 
-  const viewPdf = (r) => {
-    // Open in new tab using authenticated cookie
-    window.open(`${API}/ricevute/${r.id}/pdf`, "_blank");
+  const viewPdf = async (r) => {
+    try {
+      const blob = await fetchPdfBlob(r.id);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) { toast.error("Errore apertura PDF"); }
   };
 
   const openEmail = (r) => {
     setSelectedRid(r.id);
     const t = tesserati.find((x) => x.id === r.tesserato_id);
-    setEmailTo(t?.email || "");
-    setEmailMessage("");
-    setEmailOpen(true);
+    setEmailTo(t?.email || ""); setEmailMessage(""); setEmailOpen(true);
   };
 
   const sendEmail = async () => {
     try {
       await api.post(`/ricevute/${selectedRid}/send-email`,
         { email: emailTo, message: emailMessage });
-      toast.success("Email inviata");
-      setEmailOpen(false);
+      toast.success("Email inviata"); setEmailOpen(false);
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
 
   const shareWhatsApp = async (r) => {
     try {
-      // Download PDF locally first (browser handles it)
       await downloadPdf(r);
       const { data } = await api.get(`/ricevute/${r.id}/whatsapp-link`);
       window.open(data.url, "_blank");
-      toast.info("Allega il PDF appena scaricato al messaggio WhatsApp.");
+      toast.info("PDF scaricato. Allegalo al messaggio WhatsApp.");
     } catch (e) { toast.error("Errore WhatsApp"); }
   };
 
   const del = async (r) => {
-    if (!window.confirm(`Annullare la ricevuta N.${r.numero}?`)) return;
+    if (!window.confirm(`Eliminare definitivamente la ricevuta N.${r.numero}? La numerazione verrà scalata se è l'ultima emessa.`)) return;
     try {
-      await api.delete(`/ricevute/${r.id}`);
-      toast.success("Ricevuta annullata"); load();
+      const { data } = await api.delete(`/ricevute/${r.id}`);
+      toast.success(data.numero_riutilizzabile ? "Ricevuta eliminata, numerazione riutilizzabile" : "Ricevuta eliminata");
+      load();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
 
@@ -129,11 +169,10 @@ export default function Ricevute() {
           <div className="wm-label">Gestione</div>
           <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Ricevute</h1>
           <p className="text-white/50 mt-2 text-sm">
-            Numerazione unica condivisa. Ogni ricevuta è attribuita al tecnico che l'ha emessa.
+            Numerazione unica condivisa. {isAdmin && "Come admin puoi attribuire la ricevuta a un tecnico specifico."}
           </p>
         </div>
-        <Button onClick={openNew} data-testid="add-ricevuta-btn"
-          className="bg-[#007AFF] hover:bg-[#005BB5]">
+        <Button onClick={openNew} data-testid="add-ricevuta-btn" className="bg-[#007AFF] hover:bg-[#005BB5]">
           <Plus size={16} className="mr-1" /> Nuova ricevuta
         </Button>
       </div>
@@ -145,7 +184,7 @@ export default function Ricevute() {
               <th className="p-3 wm-label">Numero</th>
               <th className="p-3 wm-label">Data</th>
               <th className="p-3 wm-label">Tesserato</th>
-              <th className="p-3 wm-label">Emessa da</th>
+              <th className="p-3 wm-label">Emessa per</th>
               <th className="p-3 wm-label text-right">Totale</th>
               <th className="p-3 wm-label text-right">Azioni</th>
             </tr>
@@ -158,22 +197,36 @@ export default function Ricevute() {
                   {r.annullata && <span className="ml-2 text-xs text-[#FF3B30]">ANNULLATA</span>}</td>
                 <td className="p-3">{fmtDate(r.data)}</td>
                 <td className="p-3">{r.tesserato_nome}</td>
-                <td className="p-3 text-white/70">{r.emesso_da_nome}</td>
+                <td className="p-3 text-white/70">{r.emesso_per_nome || r.emesso_da_nome}</td>
                 <td className="p-3 text-right font-semibold">{fmtEur(r.totale)}</td>
-                <td className="p-3 text-right whitespace-nowrap">
-                  <Button variant="ghost" size="sm" onClick={() => viewPdf(r)}
-                    data-testid={`view-pdf-${r.id}`}><Eye size={14} /></Button>
-                  <Button variant="ghost" size="sm" onClick={() => downloadPdf(r)}
-                    data-testid={`download-pdf-${r.id}`}><Download size={14} /></Button>
-                  <Button variant="ghost" size="sm" onClick={() => openEmail(r)}
-                    data-testid={`email-ricevuta-${r.id}`}><Mail size={14} /></Button>
-                  <Button variant="ghost" size="sm" onClick={() => shareWhatsApp(r)}
-                    data-testid={`whatsapp-${r.id}`}><MessageCircle size={14} /></Button>
-                  {user?.role === "admin" && !r.annullata && (
-                    <Button variant="ghost" size="sm" onClick={() => del(r)}
-                      className="text-[#FF3B30]" data-testid={`delete-ricevuta-${r.id}`}>
-                      <Trash2 size={14} />
-                    </Button>
+                <td className="p-3 text-right whitespace-nowrap space-x-1">
+                  <Button variant="outline" size="sm" onClick={() => viewPdf(r)}
+                    data-testid={`view-pdf-${r.id}`} className="border-white/20 h-8">
+                    <Eye size={13} className="mr-1" /> PDF
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => downloadPdf(r)}
+                    data-testid={`download-pdf-${r.id}`} className="border-white/20 h-8">
+                    <Download size={13} />
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => openEmail(r)}
+                    data-testid={`email-ricevuta-${r.id}`}
+                    className="border-[#007AFF]/40 text-[#007AFF] hover:bg-[#007AFF]/10 h-8">
+                    <Mail size={13} className="mr-1" /> Email
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => shareWhatsApp(r)}
+                    data-testid={`whatsapp-${r.id}`}
+                    className="border-[#25D366]/40 text-[#25D366] hover:bg-[#25D366]/10 h-8">
+                    <MessageCircle size={13} className="mr-1" /> WhatsApp
+                  </Button>
+                  {isAdmin && (
+                    <>
+                      <Button variant="ghost" size="sm" onClick={() => openEdit(r)}
+                        data-testid={`edit-ricevuta-${r.id}`} className="h-8"><Pencil size={13} /></Button>
+                      <Button variant="ghost" size="sm" onClick={() => del(r)}
+                        className="text-[#FF3B30] h-8" data-testid={`delete-ricevuta-${r.id}`}>
+                        <Trash2 size={13} />
+                      </Button>
+                    </>
                   )}
                 </td>
               </tr>
@@ -186,11 +239,14 @@ export default function Ricevute() {
         </table>
       </div>
 
-      {/* Nuova ricevuta dialog */}
+      {/* Nuova/edit ricevuta dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-3xl bg-[#0F0F13] border-white/10" data-testid="ricevuta-dialog">
+        <DialogContent className="max-w-3xl bg-[#0F0F13] border-white/10 max-h-[90vh] overflow-y-auto"
+          data-testid="ricevuta-dialog">
           <DialogHeader>
-            <DialogTitle className="font-display">Nuova ricevuta</DialogTitle>
+            <DialogTitle className="font-display">
+              {editingId ? "Modifica ricevuta" : "Nuova ricevuta"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-3">
@@ -216,39 +272,65 @@ export default function Ricevute() {
               </div>
             </div>
 
+            {isAdmin && tecnici.length > 0 && (
+              <div>
+                <Label className="wm-label text-xs">Emessa per (tecnico) — flusso cassa attribuito</Label>
+                <Select value={form.emesso_per_id || "self"}
+                  onValueChange={(v) => setForm({ ...form, emesso_per_id: v === "self" ? "" : v })}>
+                  <SelectTrigger className="bg-black/40 border-white/10" data-testid="select-emesso-per">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#0F0F13] border-white/10 text-white">
+                    <SelectItem value="self">Me stesso ({user?.name})</SelectItem>
+                    {tecnici.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label className="wm-label text-xs">Voci</Label>
               {form.items.map((it, i) => (
-                <div key={i} className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-3">
-                    <Select value="" onValueChange={(v) => applyTipo(i, v)}>
-                      <SelectTrigger className="bg-black/40 border-white/10 h-9 text-xs"
-                        data-testid={`select-tipo-${i}`}>
-                        <SelectValue placeholder="Pacchetto…" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-[#0F0F13] border-white/10 text-white">
-                        {tipi.filter((x) => x.attivo).map((t) => (
-                          <SelectItem key={t.id} value={t.id}>{t.nome}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                <div key={i} className="space-y-2 p-3 bg-black/30 rounded">
+                  <div className="grid grid-cols-12 gap-2 items-end">
+                    <div className="col-span-3">
+                      <Select value={it.tipo_pacchetto_id || ""} onValueChange={(v) => applyTipo(i, v)}>
+                        <SelectTrigger className="bg-black/40 border-white/10 h-9 text-xs"
+                          data-testid={`select-tipo-${i}`}>
+                          <SelectValue placeholder="Pacchetto…" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[#0F0F13] border-white/10 text-white">
+                          {tipi.filter((x) => x.attivo).map((t) => (
+                            <SelectItem key={t.id} value={t.id}>{t.nome}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Input className="col-span-5 bg-black/40 border-white/10 h-9"
+                      placeholder="Descrizione" value={it.descrizione}
+                      onChange={(e) => updateItem(i, { descrizione: e.target.value })}
+                      data-testid={`item-descrizione-${i}`} />
+                    <Input className="col-span-2 bg-black/40 border-white/10 h-9"
+                      type="number" placeholder="N. lez." value={it.num_lezioni}
+                      onChange={(e) => updateItem(i, { num_lezioni: e.target.value })}
+                      data-testid={`item-lezioni-${i}`} />
+                    <Input className="col-span-1 bg-black/40 border-white/10 h-9"
+                      type="number" step="0.01" placeholder="€" value={it.importo}
+                      onChange={(e) => updateItem(i, { importo: e.target.value })}
+                      data-testid={`item-importo-${i}`} />
+                    <Button variant="ghost" size="sm" className="col-span-1 text-[#FF3B30]"
+                      onClick={() => removeItem(i)} disabled={form.items.length === 1}>
+                      <Trash2 size={14} />
+                    </Button>
                   </div>
-                  <Input className="col-span-5 bg-black/40 border-white/10 h-9"
-                    placeholder="Descrizione" value={it.descrizione}
-                    onChange={(e) => updateItem(i, { descrizione: e.target.value })}
-                    data-testid={`item-descrizione-${i}`} />
-                  <Input className="col-span-2 bg-black/40 border-white/10 h-9"
-                    type="number" placeholder="N. lez." value={it.num_lezioni}
-                    onChange={(e) => updateItem(i, { num_lezioni: e.target.value })}
-                    data-testid={`item-lezioni-${i}`} />
-                  <Input className="col-span-1 bg-black/40 border-white/10 h-9"
-                    type="number" step="0.01" placeholder="€" value={it.importo}
-                    onChange={(e) => updateItem(i, { importo: e.target.value })}
-                    data-testid={`item-importo-${i}`} />
-                  <Button variant="ghost" size="sm" className="col-span-1 text-[#FF3B30]"
-                    onClick={() => removeItem(i)} disabled={form.items.length === 1}>
-                    <Trash2 size={14} />
-                  </Button>
+                  <label className="flex items-center gap-2 text-xs text-white/60 cursor-pointer">
+                    <input type="checkbox" checked={!!it.esclude_da_compensi}
+                      onChange={(e) => updateItem(i, { esclude_da_compensi: e.target.checked })}
+                      data-testid={`item-esclude-${i}`} />
+                    Escludi questa voce dal calcolo dei compensi (es. tesseramento)
+                  </label>
                 </div>
               ))}
               <Button variant="outline" size="sm" onClick={addItem}
@@ -262,9 +344,7 @@ export default function Ricevute() {
                 <Label className="wm-label text-xs">Metodo pagamento</Label>
                 <Select value={form.metodo_pagamento}
                   onValueChange={(v) => setForm({ ...form, metodo_pagamento: v })}>
-                  <SelectTrigger className="bg-black/40 border-white/10">
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger className="bg-black/40 border-white/10"><SelectValue /></SelectTrigger>
                   <SelectContent className="bg-[#0F0F13] border-white/10 text-white">
                     {["Contanti", "Bonifico", "Carta", "POS", "Assegno"].map((m) => (
                       <SelectItem key={m} value={m}>{m}</SelectItem>
@@ -286,21 +366,18 @@ export default function Ricevute() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)} className="border-white/20">
-              Annulla
-            </Button>
+            <Button variant="outline" onClick={() => setOpen(false)} className="border-white/20">Annulla</Button>
             <Button onClick={save} className="bg-[#007AFF] hover:bg-[#005BB5]"
-              data-testid="save-ricevuta-btn">Emetti ricevuta</Button>
+              data-testid="save-ricevuta-btn">
+              {editingId ? "Salva modifiche" : "Emetti ricevuta"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Email dialog */}
       <Dialog open={emailOpen} onOpenChange={setEmailOpen}>
         <DialogContent className="bg-[#0F0F13] border-white/10" data-testid="email-dialog">
-          <DialogHeader>
-            <DialogTitle className="font-display">Invia ricevuta via email</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle className="font-display">Invia ricevuta via email</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <Label className="wm-label text-xs">Destinatario</Label>
@@ -314,13 +391,9 @@ export default function Ricevute() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEmailOpen(false)} className="border-white/20">
-              Annulla
-            </Button>
+            <Button variant="outline" onClick={() => setEmailOpen(false)} className="border-white/20">Annulla</Button>
             <Button onClick={sendEmail} className="bg-[#007AFF] hover:bg-[#005BB5]"
-              data-testid="send-email-btn">
-              <Mail size={14} className="mr-1" /> Invia
-            </Button>
+              data-testid="send-email-btn"><Mail size={14} className="mr-1" /> Invia</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

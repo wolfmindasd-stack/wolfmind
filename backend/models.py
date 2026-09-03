@@ -14,7 +14,7 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=6)
     name: str
     role: Literal["admin", "tecnico"] = "tecnico"
-    percentuale_compenso: float = 0.0  # % of receipts flow
+    percentuale_compenso: float = 0.0
 
 
 class UserLogin(BaseModel):
@@ -32,6 +32,7 @@ class UserUpdate(BaseModel):
 
 # --- Tesserato ---
 class TesseratoBase(BaseModel):
+    numero_tessera: Optional[str] = None
     cognome: str
     nome: str
     codice_fiscale: str
@@ -53,6 +54,7 @@ class TesseratoCreate(TesseratoBase):
 
 
 class TesseratoUpdate(BaseModel):
+    numero_tessera: Optional[str] = None
     cognome: Optional[str] = None
     nome: Optional[str] = None
     codice_fiscale: Optional[str] = None
@@ -69,13 +71,14 @@ class TesseratoUpdate(BaseModel):
     note: Optional[str] = None
 
 
-# --- Tipo Pacchetto (subscription types - editable list) ---
+# --- Tipo Pacchetto ---
 class TipoPacchettoBase(BaseModel):
-    nome: str  # e.g. "12 lezioni"
+    nome: str
     descrizione: str = ""
-    num_lezioni: Optional[int] = None  # null for "varie"
+    num_lezioni: Optional[int] = None
     prezzo_default: float = 0.0
     attivo: bool = True
+    esclude_da_compensi: bool = False
 
 
 class TipoPacchettoCreate(TipoPacchettoBase):
@@ -88,23 +91,31 @@ class TipoPacchettoUpdate(BaseModel):
     num_lezioni: Optional[int] = None
     prezzo_default: Optional[float] = None
     attivo: Optional[bool] = None
+    esclude_da_compensi: Optional[bool] = None
 
 
-# --- Abbonamento (purchased subscription bound to a tesserato) ---
+# --- Abbonamento ---
 class AbbonamentoCreate(BaseModel):
     tesserato_id: str
     tipo_pacchetto_id: Optional[str] = None
     descrizione: str
     num_lezioni_totali: Optional[int] = None
     prezzo: float
-    data_acquisto: str  # ISO date
+    data_acquisto: str
 
 
-# --- Lezione effettuata ---
-class LezioneCreate(BaseModel):
+# --- Lezione (collettiva) ---
+class LezionePartecipante(BaseModel):
+    tesserato_id: str
     abbonamento_id: str
+
+
+class LezioneCreate(BaseModel):
     data: str
+    luogo: str = ""
+    tecnico_id: Optional[str] = None
     note: Optional[str] = ""
+    partecipanti: List[LezionePartecipante] = Field(default_factory=list)
 
 
 # --- Ricevuta ---
@@ -112,7 +123,9 @@ class RicevutaItem(BaseModel):
     descrizione: str
     num_lezioni: Optional[int] = None
     importo: float
-    abbonamento_id: Optional[str] = None  # if this item is a subscription purchase
+    abbonamento_id: Optional[str] = None
+    tipo_pacchetto_id: Optional[str] = None
+    esclude_da_compensi: bool = False
 
 
 class RicevutaCreate(BaseModel):
@@ -121,6 +134,7 @@ class RicevutaCreate(BaseModel):
     metodo_pagamento: str = "Contanti"
     items: List[RicevutaItem]
     note: Optional[str] = ""
+    emesso_per_id: Optional[str] = None  # admin: attribute to a specific tecnico
 
 
 class RicevutaUpdate(BaseModel):
@@ -129,17 +143,18 @@ class RicevutaUpdate(BaseModel):
     items: Optional[List[RicevutaItem]] = None
     note: Optional[str] = None
     annullata: Optional[bool] = None
+    emesso_per_id: Optional[str] = None
 
 
-# --- Movimento contabile ---
+# --- Movimento ---
 class MovimentoCreate(BaseModel):
     data: str
     tipo: Literal["entrata", "uscita"]
     categoria: str
     descrizione: str
     importo: float
-    tecnico_id: Optional[str] = None  # for compensi/tech-linked entries
-    ricevuta_id: Optional[str] = None  # auto-linked
+    tecnico_id: Optional[str] = None
+    ricevuta_id: Optional[str] = None
 
 
 class MovimentoUpdate(BaseModel):
@@ -151,7 +166,7 @@ class MovimentoUpdate(BaseModel):
     tecnico_id: Optional[str] = None
 
 
-# --- Organizzazione (single doc) ---
+# --- Organizzazione ---
 class OrganizzazioneUpdate(BaseModel):
     name: Optional[str] = None
     address: Optional[str] = None
@@ -161,10 +176,9 @@ class OrganizzazioneUpdate(BaseModel):
     affiliation: Optional[str] = None
     president_name: Optional[str] = None
     logo_base64: Optional[str] = None
-    email_template: Optional[str] = None
+    president_signature_base64: Optional[str] = None
 
 
-# --- Send receipt ---
 class SendReceiptEmail(BaseModel):
     email: EmailStr
     message: Optional[str] = None

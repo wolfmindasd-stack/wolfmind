@@ -53,7 +53,8 @@ export default function Compensi() {
             <tr className="text-left">
               <th className="p-3 wm-label">Tecnico</th>
               <th className="p-3 wm-label text-center">N. ricevute</th>
-              <th className="p-3 wm-label text-right">Flusso generato</th>
+              <th className="p-3 wm-label text-right">Flusso totale</th>
+              <th className="p-3 wm-label text-right">Compensabile</th>
               <th className="p-3 wm-label text-center">%</th>
               <th className="p-3 wm-label text-right">Compenso dovuto</th>
             </tr>
@@ -64,13 +65,14 @@ export default function Compensi() {
                 data-testid={`compenso-row-${c.tecnico_id}`}>
                 <td className="p-3 font-medium">{c.tecnico_nome}</td>
                 <td className="p-3 text-center">{c.n_ricevute}</td>
-                <td className="p-3 text-right">{fmtEur(c.flusso_generato)}</td>
+                <td className="p-3 text-right text-white/70">{fmtEur(c.flusso_generato)}</td>
+                <td className="p-3 text-right font-semibold">{fmtEur(c.flusso_compensabile)}</td>
                 <td className="p-3 text-center">{c.percentuale}%</td>
                 <td className="p-3 text-right font-semibold text-[#FFCC00]">{fmtEur(c.compenso_dovuto)}</td>
               </tr>
             ))}
             {data.compensi.length === 0 && (
-              <tr><td colSpan={5} className="p-8 text-center text-white/40">Nessun tecnico configurato</td></tr>
+              <tr><td colSpan={6} className="p-8 text-center text-white/40">Nessun tecnico configurato</td></tr>
             )}
           </tbody>
         </table>

@@ -175,15 +175,15 @@ function PacchettiTab() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ nome: "", descrizione: "", num_lezioni: "",
-    prezzo_default: 0, attivo: true });
+    prezzo_default: 0, attivo: true, esclude_da_compensi: false });
 
   const load = async () => { const { data } = await api.get("/tipi-pacchetto"); setList(data); };
   useEffect(() => { load(); }, []);
 
   const openNew = () => { setEditing(null); setForm({ nome: "", descrizione: "",
-    num_lezioni: "", prezzo_default: 0, attivo: true }); setOpen(true); };
+    num_lezioni: "", prezzo_default: 0, attivo: true, esclude_da_compensi: false }); setOpen(true); };
   const openEdit = (p) => { setEditing(p.id); setForm({ ...p,
-    num_lezioni: p.num_lezioni ?? "" }); setOpen(true); };
+    num_lezioni: p.num_lezioni ?? "", esclude_da_compensi: !!p.esclude_da_compensi }); setOpen(true); };
   const save = async () => {
     try {
       const payload = { ...form,
@@ -216,6 +216,7 @@ function PacchettiTab() {
               <th className="p-3 wm-label text-center">N. lezioni</th>
               <th className="p-3 wm-label text-right">Prezzo</th>
               <th className="p-3 wm-label text-center">Attivo</th>
+              <th className="p-3 wm-label text-center">Compensi</th>
               <th className="p-3 wm-label text-right"></th>
             </tr>
           </thead>
@@ -227,6 +228,11 @@ function PacchettiTab() {
                 <td className="p-3 text-center">{p.num_lezioni ?? "-"}</td>
                 <td className="p-3 text-right">{fmtEur(p.prezzo_default)}</td>
                 <td className="p-3 text-center">{p.attivo ? "✓" : "—"}</td>
+                <td className="p-3 text-center text-xs">
+                  {p.esclude_da_compensi ?
+                    <span className="text-[#FFCC00]">Escluso</span> :
+                    <span className="text-white/60">Incluso</span>}
+                </td>
                 <td className="p-3 text-right">
                   <Button size="sm" variant="ghost" onClick={() => openEdit(p)}><Pencil size={14} /></Button>
                   <Button size="sm" variant="ghost" onClick={() => del(p)} className="text-[#FF3B30]">
@@ -264,6 +270,12 @@ function PacchettiTab() {
               <Switch checked={form.attivo} onCheckedChange={(v) => setForm({ ...form, attivo: v })} />
               <Label>Attivo (mostrato in ricevute)</Label>
             </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={form.esclude_da_compensi}
+                onCheckedChange={(v) => setForm({ ...form, esclude_da_compensi: v })}
+                data-testid="pacchetto-esclude-compensi" />
+              <Label>Escludi dal calcolo compensi tecnici (es. tesseramento)</Label>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)} className="border-white/20">Annulla</Button>
@@ -286,7 +298,8 @@ function OrgTab() {
     try {
       const payload = { name: org.name, address: org.address, fiscal_code: org.fiscal_code,
         email: org.email, pec: org.pec, affiliation: org.affiliation,
-        president_name: org.president_name, logo_base64: org.logo_base64 };
+        president_name: org.president_name, logo_base64: org.logo_base64,
+        president_signature_base64: org.president_signature_base64 };
       await api.patch("/organizzazione", payload);
       toast.success("Salvato");
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
@@ -296,6 +309,13 @@ function OrgTab() {
     const f = e.target.files?.[0]; if (!f) return;
     const reader = new FileReader();
     reader.onload = () => setOrg({ ...org, logo_base64: reader.result });
+    reader.readAsDataURL(f);
+  };
+
+  const uploadSignature = (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => setOrg({ ...org, president_signature_base64: reader.result });
     reader.readAsDataURL(f);
   };
 
@@ -323,6 +343,28 @@ function OrgTab() {
           )}
           <input type="file" accept="image/*" onChange={uploadLogo} data-testid="org-logo-upload"
             className="text-sm text-white/60" />
+          {org.logo_base64 && (
+            <Button size="sm" variant="ghost" className="text-[#FF3B30]"
+              onClick={() => setOrg({ ...org, logo_base64: null })}>Rimuovi</Button>
+          )}
+        </div>
+      </div>
+      <div>
+        <Label className="wm-label text-xs">Firma digitalizzata Presidente (PNG con sfondo trasparente consigliato)</Label>
+        <div className="flex items-center gap-4 mt-2">
+          {org.president_signature_base64 && (
+            <img src={org.president_signature_base64} alt="signature"
+              className="h-14 w-40 object-contain bg-white/95 rounded p-1" />
+          )}
+          <input type="file" accept="image/*" onChange={uploadSignature}
+            data-testid="org-signature-upload" className="text-sm text-white/60" />
+          {org.president_signature_base64 && (
+            <Button size="sm" variant="ghost" className="text-[#FF3B30]"
+              onClick={() => setOrg({ ...org, president_signature_base64: null })}>Rimuovi</Button>
+          )}
+        </div>
+        <div className="text-xs text-white/40 mt-1">
+          La firma apparirà sopra il nome del Presidente in ogni ricevuta PDF.
         </div>
       </div>
       <div className="flex justify-end">
