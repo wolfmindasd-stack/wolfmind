@@ -1,17 +1,21 @@
 import React from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { api, API } from "../lib/api";
 import {
   LayoutDashboard, Users, Package, Receipt, BookOpen,
   BarChart3, Wallet, Settings, LogOut, ShieldCheck,
+  BookUser, Calendar, FileSpreadsheet,
 } from "lucide-react";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testid: "nav-dashboard" },
   { to: "/tesserati", label: "Tesserati", icon: Users, testid: "nav-tesserati" },
+  { to: "/libro-soci", label: "Libro Soci", icon: BookUser, testid: "nav-libro-soci" },
   { to: "/ricevute", label: "Ricevute", icon: Receipt, testid: "nav-ricevute" },
   { to: "/abbonamenti", label: "Abbonamenti", icon: Package, testid: "nav-abbonamenti" },
+  { to: "/calendario", label: "Calendario", icon: Calendar, testid: "nav-calendario" },
   { to: "/movimenti", label: "Libro Contabile", icon: BookOpen, testid: "nav-movimenti" },
   { to: "/compensi", label: "Compensi", icon: Wallet, testid: "nav-compensi" },
   { to: "/report", label: "Report Bilancio", icon: BarChart3, testid: "nav-report" },
@@ -29,6 +33,18 @@ export default function Layout({ children }) {
   const handleLogout = async () => {
     await logout();
     nav("/login");
+  };
+
+  const downloadBackup = async () => {
+    try {
+      const res = await api.get("/export/excel", { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `WolfsMind_Backup_${new Date().toISOString().slice(0,10)}.xlsx`;
+      a.click(); URL.revokeObjectURL(url);
+      toast.success("Backup Excel scaricato");
+    } catch { toast.error("Errore export"); }
   };
 
   return (
@@ -70,6 +86,14 @@ export default function Layout({ children }) {
               {user?.email} · {user?.role === "admin" ? "Admin" : "Tecnico"}
             </div>
           </div>
+          {isAdmin && (
+            <button onClick={downloadBackup} data-testid="download-backup-btn"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md mb-2
+                         border border-[#34C759]/40 text-sm text-[#34C759] hover:bg-[#34C759]/10
+                         transition-colors">
+              <FileSpreadsheet size={16} /> Backup Excel
+            </button>
+          )}
           <button onClick={handleLogout} data-testid="logout-btn"
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md
                        border border-white/10 text-sm text-white/70 hover:text-white

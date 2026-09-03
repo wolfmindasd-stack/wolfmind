@@ -182,3 +182,43 @@ class OrganizzazioneUpdate(BaseModel):
 class SendReceiptEmail(BaseModel):
     email: EmailStr
     message: Optional[str] = None
+
+
+# --- Calendario Lezioni ---
+class SlotCreate(BaseModel):
+    data: str  # YYYY-MM-DD
+    ora: str  # HH:MM
+    durata_min: int = 60
+    luogo: str = ""
+    tecnico_id: Optional[str] = None
+    capacita: int = 8
+    descrizione: str = ""
+    ricorrenza_settimanale: bool = False
+    ricorrenza_fino_al: Optional[str] = None  # YYYY-MM-DD
+
+
+class SlotUpdate(BaseModel):
+    data: Optional[str] = None
+    ora: Optional[str] = None
+    durata_min: Optional[int] = None
+    luogo: Optional[str] = None
+    tecnico_id: Optional[str] = None
+    capacita: Optional[int] = None
+    descrizione: Optional[str] = None
+
+
+class PrenotazioneCreate(BaseModel):
+    slot_id: str
+    tesserato_id: str
+    abbonamento_id: Optional[str] = None
+
+
+# --- Erogazione Compensi ---
+class ErogaCompenso(BaseModel):
+    tecnico_id: str
+    data: str
+    importo: float
+    periodo_da: Optional[str] = None
+    periodo_a: Optional[str] = None
+    metodo: str = "Bonifico"
+    note: Optional[str] = ""

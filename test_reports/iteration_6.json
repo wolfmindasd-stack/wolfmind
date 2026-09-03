@@ -1,0 +1,54 @@
+{
+  "summary": "Iteration 6 backend-only verification of the pdf_utils IndentationError fix + the new GET /api/libro-soci/pdf endpoint + full regression. Extended /app/backend/tests/backend_test.py from 84 to 96 tests with 3 new classes (TestIter6BackendHealth, TestIter6LibroSociPdf, TestIter6PdfRegression) and installed `pypdf` so PDFs are actually parsed/text-extracted instead of only header-sniffed. FINAL RUN: 96/96 passed (46.97s, serial -n 0). VERIFIED: (1) Backend healthy - pdf_utils imports all three generators (generate_receipt_pdf, generate_balance_report_pdf, generate_libro_soci_pdf), no IndentationError/ImportError, backend.err.log shows a clean 'Application startup complete' after the last reload; GET /api/auth/me unauthenticated -> 401; GET / -> no 5xx. (2) Admin login (admin@wolfsmind.it) works; GET /api/organizzazione returns president_name='Drovetti Cassiano Bruno'. (3) NEW GET /api/libro-soci/pdf?anno=2026 as admin -> 200, content-type application/pdf, Content-Disposition contains 'LibroSoci_2026.pdf', bytes start with %PDF; pypdf-extracted text contains 'LIBRO SOCI', 'Anno associativo: 2026', 'RIEPILOGO' and 'ELENCO SOCI', and the created test tesserato/numero_tessera appears in the ELENCO table. (4) Stats inside the PDF match GET /api/libro-soci JSON ('Soci totali N' and 'Attivi N' regex-matched against the JSON-derived counts). (5) No-anno call defaults to the current year (LibroSoci_2026.pdf). (6) Tecnico -> 200 and the PDF contains only its own tesserato (numero_tessera T6-TEC present, admin-only T6-ADM absent) => no cross-user data leak. (7) Unauthenticated -> 401. (8) anno=1999 (no matching quota data) still renders a valid PDF (no divide/empty-table crash). Regression: GET /api/ricevute/{id}/pdf still 200 with 'RICEVUTA' text, GET /api/report/bilancio/pdf still 200 with 'REPORT BILANCIO' text, so generate_balance_report_pdf re-append is intact. Auth playbook re-checked: bcrypt hash starts with $2b$, login sets httpOnly+Secure cookies (auth_utils.py:52-54), CORS_ORIGINS explicit in backend/.env with allow_credentials=True, brute-force lockout + logout + bearer-token tests all pass. edge_test.py: 7/8 pass, the single failure is the pre-existing PATCH-reassign authz defect already reported in iteration 5 (unchanged, not a regression). db.login_attempts is cleared by the session fixture; no email 429 was hit this run.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "PATCH /api/calendario/{slot_id}",
+        "issue": "PRE-EXISTING (iteration 5, unchanged): a tecnico can reassign its own slot to a different tecnico_id and gets 200 instead of 403. edge_test.py::TestCalendarioEdges::test_tecnico_can_reassign_own_slot_to_other still fails."
+      },
+      {
+        "endpoint": "GET /api/libro-soci and /api/libro-soci/pdf",
+        "issue": "N+1 query pattern: one db.ricevute.find() per socio inside the loop (server.py:833), with to_list(3000) members. Will get slow/time out as membership grows. Use a single aggregate/$in query grouped by tesserato_id."
+      },
+      {
+        "endpoint": "GET /api/libro-soci/pdf?anno=YYYY",
+        "issue": "The `anno` param only affects stato_socio/quota computation, not membership: the ELENCO SOCI table always lists every tesserato regardless of the requested year (anno=1999 returns the full current member list). Behaviour is inherited from /api/libro-soci; confirm this is intended for a legal 'libro soci' per associative year."
+      },
+      {
+        "endpoint": "GET /api/libro-soci/pdf",
+        "issue": "Content-Disposition uses `inline` (browser preview) while the feature is described as an export/download. If a download is expected, use `attachment`."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/edge_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: fix the pre-existing tecnico slot-reassign 403 gap (PATCH /api/calendario/{id}).",
+    "Optional: de-N+1 the libro-soci quota computation before the member list grows.",
+    "Optional: decide inline vs attachment for the libro-soci PDF and whether the year should filter membership."
+  ],
+  "critical_code_review_comments": [
+    "server.py:852 `libro_soci_pdf` calls the route handler `libro_soci()` directly - it works but couples the two routes; extract a shared `_build_libro_soci(anno, user)` helper so the PDF route does not depend on the JSON route's signature/response shape.",
+    "server.py is 1220 lines and pdf_utils.py 450 lines - server.py should be split into routers (auth/tesserati/ricevute/calendario/report) per the >700-line guideline.",
+    "The libro-soci quota heuristic matches on the substring 'tessera' in item descriptions (server.py:840); a typo or renamed package silently drops the quota from the legal register. Prefer an explicit item type/flag."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (96/96 backend_test.py; edge_test.py 7/8 - 1 pre-existing known defect)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Ephemeral only: TEST_ prefixed tesserati (numero_tessera T6-001, T6-TEC, T6-ADM), test_tec_*@example.com tecnico users and one ricevuta; all deleted by session fixtures. Installed python package `pypdf` for PDF text extraction in tests.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@wolfsmind.it / Admin2026! (from /app/memory/test_credentials.md)",
+  "context_for_next_testing_agent": "Run serially: cd /app/backend && python -m pytest tests/backend_test.py -q -n 0. New iter-6 helper `_pdf_text(bytes)` uses pypdf to extract PDF text - reuse it instead of only checking the %PDF magic bytes. The pdf_utils import test relies on cwd=/app/backend. Only open defect: edge_test.py tecnico PATCH slot reassign expects 403, gets 200. Frontend of the libro-soci PDF button was NOT tested (backend-only scope) - a UI pass on /libro-soci download is still needed.",
+  "rca_of_the_issue": "Reported total breakage was a module-level IndentationError in pdf_utils.py (line 342: orphaned second line of generate_balance_report_pdf's signature left behind by a search_replace that only matched the first signature line). Since server.py imports pdf_utils at line 29, uvicorn failed to load the app and every request errored. The fix (removing the orphaned lines and re-appending the function) is confirmed: pdf_utils imports cleanly, uvicorn logged 'Application startup complete', and all 96 API tests including all three PDF generators pass."
+}

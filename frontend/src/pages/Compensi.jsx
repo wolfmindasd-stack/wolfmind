@@ -1,21 +1,66 @@
 import React, { useEffect, useState } from "react";
-import { api, fmtEur } from "../lib/api";
+import { api, fmtEur, fmtDate, formatApiErrorDetail, todayIso } from "../lib/api";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Wallet, Download, CheckCircle } from "lucide-react";
+import { toast } from "sonner";
+import { useAuth } from "../lib/auth";
 
 export default function Compensi() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [data, setData] = useState(null);
+  const [erogati, setErogati] = useState([]);
   const [from, setFrom] = useState(`${new Date().getFullYear()}-01-01`);
   const [to, setTo] = useState(`${new Date().getFullYear()}-12-31`);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    tecnico_id: "", data: todayIso(), importo: 0,
+    periodo_da: from, periodo_a: to, metodo: "Bonifico", note: "",
+  });
 
   const load = async () => {
-    const { data } = await api.get(`/compensi?date_from=${from}&date_to=${to}`);
-    setData(data);
+    const [c, e] = await Promise.all([
+      api.get(`/compensi?date_from=${from}&date_to=${to}`),
+      api.get("/compensi/erogati"),
+    ]);
+    setData(c.data); setErogati(e.data);
   };
   useEffect(() => { load(); }, []);
+
+  const eroga = (c) => {
+    // Determine already paid in this range
+    const paidInRange = erogati
+      .filter((x) => x.tecnico_id === c.tecnico_id &&
+                     x.periodo_da === from && x.periodo_a === to)
+      .reduce((s, x) => s + Number(x.importo || 0), 0);
+    const suggested = Math.max(0, c.compenso_dovuto - paidInRange);
+    setForm({
+      tecnico_id: c.tecnico_id, data: todayIso(), importo: suggested,
+      periodo_da: from, periodo_a: to, metodo: "Bonifico", note: "",
+    });
+    setOpen(true);
+  };
+
+  const saveEroga = async () => {
+    if (!form.importo || form.importo <= 0) { toast.error("Inserisci un importo"); return; }
+    try {
+      await api.post("/compensi/eroga", { ...form, importo: Number(form.importo) });
+      toast.success("Compenso erogato. Movimento uscita creato.");
+      setOpen(false); load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
 
   if (!data) return <div className="text-white/50">Caricamento…</div>;
 
   const totFlusso = data.compensi.reduce((s, c) => s + c.flusso_generato, 0);
-  const totCompenso = data.compensi.reduce((s, c) => s + c.compenso_dovuto, 0);
+  const totComp = data.compensi.reduce((s, c) => s + c.compenso_dovuto, 0);
+  const totErogato = erogati
+    .filter((x) => x.data >= from && x.data <= to + "T23:59:59")
+    .reduce((s, x) => s + x.importo, 0);
 
   return (
     <div className="space-y-6" data-testid="compensi-page">
@@ -23,7 +68,7 @@ export default function Compensi() {
         <div className="wm-label">Analisi</div>
         <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Compensi tecnici</h1>
         <p className="text-white/50 mt-2 text-sm">
-          Percentuale sul flusso cassa generato da ricevute emesse in prima persona.
+          Percentuale sul flusso cassa. Eroga il compenso in un click → viene creata un'uscita nel libro contabile.
         </p>
       </div>
 
@@ -40,11 +85,13 @@ export default function Compensi() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="wm-card p-5"><div className="wm-label">Flusso cassa totale</div>
           <div className="mt-2 font-display text-2xl font-bold">{fmtEur(totFlusso)}</div></div>
-        <div className="wm-card p-5"><div className="wm-label">Totale compensi dovuti</div>
-          <div className="mt-2 font-display text-2xl font-bold text-[#FFCC00]">{fmtEur(totCompenso)}</div></div>
+        <div className="wm-card p-5"><div className="wm-label">Compensi maturati</div>
+          <div className="mt-2 font-display text-2xl font-bold text-[#FFCC00]">{fmtEur(totComp)}</div></div>
+        <div className="wm-card p-5"><div className="wm-label">Compensi erogati</div>
+          <div className="mt-2 font-display text-2xl font-bold text-[#34C759]">{fmtEur(totErogato)}</div></div>
       </div>
 
       <div className="wm-card overflow-hidden">
@@ -57,6 +104,7 @@ export default function Compensi() {
               <th className="p-3 wm-label text-right">Compensabile</th>
               <th className="p-3 wm-label text-center">%</th>
               <th className="p-3 wm-label text-right">Compenso dovuto</th>
+              {isAdmin && <th className="p-3 wm-label text-right">Azione</th>}
             </tr>
           </thead>
           <tbody>
@@ -69,14 +117,100 @@ export default function Compensi() {
                 <td className="p-3 text-right font-semibold">{fmtEur(c.flusso_compensabile)}</td>
                 <td className="p-3 text-center">{c.percentuale}%</td>
                 <td className="p-3 text-right font-semibold text-[#FFCC00]">{fmtEur(c.compenso_dovuto)}</td>
+                {isAdmin && (
+                  <td className="p-3 text-right">
+                    <Button size="sm" onClick={() => eroga(c)} disabled={c.compenso_dovuto <= 0}
+                      className="bg-[#34C759]/20 border border-[#34C759]/50 text-[#34C759] hover:bg-[#34C759]/30"
+                      data-testid={`eroga-btn-${c.tecnico_id}`}>
+                      <Wallet size={12} className="mr-1" /> Eroga
+                    </Button>
+                  </td>
+                )}
               </tr>
             ))}
             {data.compensi.length === 0 && (
-              <tr><td colSpan={6} className="p-8 text-center text-white/40">Nessun tecnico configurato</td></tr>
+              <tr><td colSpan={isAdmin ? 7 : 6} className="p-8 text-center text-white/40">Nessun tecnico</td></tr>
             )}
           </tbody>
         </table>
       </div>
+
+      <div>
+        <div className="wm-label mb-2 flex items-center gap-2">
+          <CheckCircle size={12} className="text-[#34C759]" /> Storico erogazioni
+        </div>
+        <div className="wm-card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-white/[0.02] border-b border-white/10">
+              <tr className="text-left">
+                <th className="p-3 wm-label">Data</th>
+                <th className="p-3 wm-label">Tecnico</th>
+                <th className="p-3 wm-label">Periodo</th>
+                <th className="p-3 wm-label">Metodo</th>
+                <th className="p-3 wm-label text-right">Importo</th>
+                <th className="p-3 wm-label">Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {erogati.slice(0, 20).map((e) => (
+                <tr key={e.id} className="border-b border-white/5">
+                  <td className="p-3">{fmtDate(e.data)}</td>
+                  <td className="p-3">{e.tecnico_nome}</td>
+                  <td className="p-3 text-white/60 text-xs">
+                    {e.periodo_da && e.periodo_a ? `${fmtDate(e.periodo_da)} → ${fmtDate(e.periodo_a)}` : "—"}
+                  </td>
+                  <td className="p-3 text-white/70">{e.metodo}</td>
+                  <td className="p-3 text-right font-semibold text-[#34C759]">{fmtEur(e.importo)}</td>
+                  <td className="p-3 text-white/60 text-xs">{e.note}</td>
+                </tr>
+              ))}
+              {erogati.length === 0 && (
+                <tr><td colSpan={6} className="p-8 text-center text-white/40">Nessuna erogazione registrata</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="bg-[#0F0F13] border-white/10">
+          <DialogHeader><DialogTitle className="font-display">Eroga compenso</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div><Label className="wm-label text-xs">Data pagamento</Label>
+                <Input type="date" value={form.data}
+                  onChange={(e) => setForm({ ...form, data: e.target.value })}
+                  className="bg-black/40 border-white/10" data-testid="eroga-data" /></div>
+              <div><Label className="wm-label text-xs">Importo (€)</Label>
+                <Input type="number" step="0.01" value={form.importo}
+                  onChange={(e) => setForm({ ...form, importo: e.target.value })}
+                  className="bg-black/40 border-white/10" data-testid="eroga-importo" /></div>
+            </div>
+            <div><Label className="wm-label text-xs">Metodo</Label>
+              <Select value={form.metodo} onValueChange={(v) => setForm({ ...form, metodo: v })}>
+                <SelectTrigger className="bg-black/40 border-white/10"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-[#0F0F13] border-white/10 text-white">
+                  {["Bonifico", "Contanti", "Assegno", "Carta"].map((m) => (
+                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select></div>
+            <div><Label className="wm-label text-xs">Note</Label>
+              <Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })}
+                className="bg-black/40 border-white/10" /></div>
+            <div className="text-xs text-white/50">
+              Verrà creato automaticamente un movimento <b>Uscita · Compenso tecnico</b> nel libro contabile.
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)} className="border-white/20">Annulla</Button>
+            <Button onClick={saveEroga} className="bg-[#34C759] hover:bg-[#28a745] text-white"
+              data-testid="confirm-eroga-btn">
+              <Wallet size={14} className="mr-1" /> Eroga
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

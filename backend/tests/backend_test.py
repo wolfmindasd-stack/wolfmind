@@ -10,6 +10,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,8 @@ PNG_SIGN = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAAAoCAIAAAC6iKly"
             "QmCC")
 # Base64 that decodes but is NOT a valid image stream (must be silently skipped).
 CORRUPT_IMG = "data:image/png;base64,notarealimage"
+# Definitive president name (iteration-5 migration target).
+PRESIDENT_NAME = "Drovetti Cassiano Bruno"
 
 
 def _db():
@@ -303,13 +306,18 @@ class TestOrganizzazione:
         assert r.status_code == 200 and "Wolf" in r.json()["name"]
         p = admin.patch(f"{API}/organizzazione", json={
             "president_signature_base64": PNG_SIGN, "logo_base64": PNG_SIGN,
-            "president_name": "Drovelli Caivano Bruno"}, timeout=30)
+            "president_name": "TEST_Presidente"}, timeout=30)
         assert p.status_code == 200, p.text[:300]
         assert p.json()["president_signature_base64"] == PNG_SIGN
+        assert p.json()["president_name"] == "TEST_Presidente"
         g = admin.get(f"{API}/organizzazione", timeout=30).json()
         assert g["president_signature_base64"] == PNG_SIGN
         assert g["logo_base64"] == PNG_SIGN
         assert "_id" not in g and g["id"] == "config"
+        # restore the real president name (must not leak test data into the config doc)
+        rb = admin.patch(f"{API}/organizzazione",
+                         json={"president_name": PRESIDENT_NAME}, timeout=30)
+        assert rb.status_code == 200 and rb.json()["president_name"] == PRESIDENT_NAME
         s, _ = mk_tecnico()
         assert s.patch(f"{API}/organizzazione", json={"name": "hack"},
                        timeout=30).status_code == 403
@@ -570,9 +578,11 @@ class TestPdf:
             assert em.status_code == 200, f"{em.status_code}: {em.text[:300]}"
         finally:
             admin.delete(f"{API}/ricevute/{d['id']}", timeout=30)
-            admin.patch(f"{API}/organizzazione",
-                        json={"logo_base64": None,
-                              "president_signature_base64": None}, timeout=30)
+            # NOTE: PATCH /organizzazione drops None values, so images cannot be
+            # cleared through the API - reset directly to avoid test pollution.
+            _db().organizzazione.update_one(
+                {"_id": "config"},
+                {"$set": {"logo_base64": None, "president_signature_base64": None}})
 
 
 # ------------------------- LEZIONI COLLETTIVE + STORICO -------------------------
@@ -802,6 +812,677 @@ class TestEmail:
             body = e.json()
             assert body["ok"] is True and body.get("email_id"), body
             doc = admin.get(f"{API}/ricevute/{d['id']}", timeout=30).json()
-            assert doc["last_sent_email"] == "delivered@resend.dev"
+            assert doc["last_sent_email_to"] == "delivered@resend.dev", doc
         finally:
             admin.delete(f"{API}/ricevute/{d['id']}", timeout=30)
+
+
+# ------------------------- ITERATION 4: PUBLIC PDF TOKEN -------------------------
+class TestPublicReceiptPdf:
+    def test_public_pdf_unauthenticated(self, admin, mk_tesserato):
+        t = mk_tesserato()
+        d = mk_ricevuta(admin, t["id"], data="2026-04-02").json()
+        try:
+            assert d.get("public_token"), f"public_token missing on create: {d}"
+            anon = requests.Session()  # no cookies / no auth header
+            r = anon.get(f"{API}/public/ricevuta/{d['public_token']}/pdf", timeout=60)
+            assert r.status_code == 200, f"{r.status_code}: {r.text[:300]}"
+            assert r.headers.get("content-type", "").startswith("application/pdf"), r.headers
+            assert r.content[:4] == b"%PDF", r.content[:20]
+            assert len(r.content) > 1000
+        finally:
+            admin.delete(f"{API}/ricevute/{d['id']}", timeout=30)
+
+    def test_public_pdf_invalid_token_404(self):
+        anon = requests.Session()
+        r = anon.get(f"{API}/public/ricevuta/{uuid.uuid4().hex}/pdf", timeout=30)
+        assert r.status_code == 404, f"{r.status_code}: {r.text[:200]}"
+
+    def test_public_pdf_after_delete_404(self, admin, mk_tesserato):
+        t = mk_tesserato()
+        d = mk_ricevuta(admin, t["id"], data="2026-04-03").json()
+        token = d["public_token"]
+        assert admin.delete(f"{API}/ricevute/{d['id']}", timeout=30).status_code == 200
+        r = requests.get(f"{API}/public/ricevuta/{token}/pdf", timeout=30)
+        assert r.status_code == 404, f"{r.status_code}: {r.text[:200]}"
+
+
+# ------------------------- ITERATION 4: SEND TRACKING -------------------------
+class TestSendTracking:
+    def test_email_tracking_fields(self, admin, mk_tesserato):
+        t = mk_tesserato()
+        d = mk_ricevuta(admin, t["id"], data="2026-04-04").json()
+        try:
+            assert d["last_sent_email_at"] is None and d["last_sent_email_to"] is None
+            e = admin.post(f"{API}/ricevute/{d['id']}/send-email",
+                           json={"email": "delivered@resend.dev"}, timeout=120)
+            assert e.status_code == 200, f"{e.status_code}: {e.text[:300]}"
+            assert e.json().get("email_id"), e.json()
+            doc = admin.get(f"{API}/ricevute/{d['id']}", timeout=30).json()
+            assert doc["last_sent_email_to"] == "delivered@resend.dev", doc
+            assert isinstance(doc["last_sent_email_at"], str) and doc["last_sent_email_at"]
+            datetime.fromisoformat(doc["last_sent_email_at"].replace("Z", "+00:00"))
+            # list endpoint exposes tracking fields too
+            lst = admin.get(f"{API}/ricevute", timeout=60).json()
+            row = next(x for x in lst if x["id"] == d["id"])
+            assert row["last_sent_email_to"] == "delivered@resend.dev", row
+            assert row["last_sent_email_at"]
+        finally:
+            admin.delete(f"{API}/ricevute/{d['id']}", timeout=30)
+
+    def test_mark_whatsapp_and_link(self, admin, mk_tesserato):
+        t = mk_tesserato()
+        d = mk_ricevuta(admin, t["id"], data="2026-04-05").json()
+        try:
+            r = admin.post(f"{API}/ricevute/{d['id']}/mark-whatsapp", timeout=30)
+            assert r.status_code == 200, r.text[:300]
+            assert r.json() == {"ok": True}
+            doc = admin.get(f"{API}/ricevute/{d['id']}", timeout=30).json()
+            assert isinstance(doc["last_sent_whatsapp_at"], str)
+            datetime.fromisoformat(doc["last_sent_whatsapp_at"].replace("Z", "+00:00"))
+            wl = admin.get(f"{API}/ricevute/{d['id']}/whatsapp-link", timeout=30)
+            assert wl.status_code == 200, wl.text[:300]
+            body = wl.json()
+            assert body["url"].startswith("https://wa.me/"), body
+            assert f"public/ricevuta/{d['public_token']}/pdf" in body["pdf_url"], body
+            # the link handed to the user must actually work unauthenticated
+            pr = requests.get(body["pdf_url"], timeout=60)
+            assert pr.status_code == 200 and pr.content[:4] == b"%PDF", pr.status_code
+        finally:
+            admin.delete(f"{API}/ricevute/{d['id']}", timeout=30)
+
+    def test_mark_whatsapp_404(self, admin):
+        r = admin.post(f"{API}/ricevute/{'0' * 24}/mark-whatsapp", timeout=30)
+        assert r.status_code == 404, r.status_code
+
+
+# ------------------------- ITERATION 4: CALENDARIO -------------------------
+class TestCalendario:
+    def _mk_slot(self, session, **extra):
+        body = {"data": "2026-03-01", "ora": "18:00", "durata_min": 60,
+                "luogo": "Palestra Front", "capacita": 8, "descrizione": "TEST_slot"}
+        body.update(extra)
+        return session.post(f"{API}/calendario", json=body, timeout=30)
+
+    def test_recurrence_creates_weekly_slots(self, admin):
+        r = self._mk_slot(admin, ricorrenza_settimanale=True,
+                          ricorrenza_fino_al="2026-03-22", descrizione="TEST_ric")
+        assert r.status_code == 200, r.text[:300]
+        body = r.json()
+        assert body["created"] == 4, body
+        assert len(body["slots"]) == 4
+        ids = [s["id"] for s in body["slots"]]
+        try:
+            dates = sorted(s["data"] for s in body["slots"])
+            assert dates == ["2026-03-01", "2026-03-08", "2026-03-15", "2026-03-22"], dates
+            for s in body["slots"]:
+                assert s["ora"] == "18:00" and s["capacita"] == 8
+                assert s["prenotazioni"] == []
+                assert "_id" not in s
+            lst = admin.get(f"{API}/calendario",
+                            params={"date_from": "2026-03-01", "date_to": "2026-03-31"},
+                            timeout=30)
+            assert lst.status_code == 200, lst.text[:300]
+            got = [s for s in lst.json() if s["id"] in ids]
+            assert len(got) == 4, len(got)
+        finally:
+            for sid in ids:
+                admin.delete(f"{API}/calendario/{sid}", timeout=30)
+
+    def test_single_slot_crud(self, admin):
+        r = self._mk_slot(admin, data="2026-05-04", ricorrenza_settimanale=False)
+        assert r.status_code == 200, r.text[:300]
+        body = r.json()
+        assert body["created"] == 1, body
+        sid = body["slots"][0]["id"]
+        p = admin.patch(f"{API}/calendario/{sid}",
+                        json={"ora": "19:30", "capacita": 4, "luogo": "TEST_Sala B"}, timeout=30)
+        assert p.status_code == 200, p.text[:300]
+        assert p.json()["ora"] == "19:30" and p.json()["capacita"] == 4
+        got = admin.get(f"{API}/calendario", params={"date_from": "2026-05-04",
+                                                     "date_to": "2026-05-04"}, timeout=30).json()
+        row = next(s for s in got if s["id"] == sid)
+        assert row["ora"] == "19:30" and row["luogo"] == "TEST_Sala B"
+        d = admin.delete(f"{API}/calendario/{sid}", timeout=30)
+        assert d.status_code == 200 and d.json()["ok"] is True
+        got = admin.get(f"{API}/calendario", params={"date_from": "2026-05-04",
+                                                     "date_to": "2026-05-04"}, timeout=30).json()
+        assert all(s["id"] != sid for s in got)
+        assert admin.delete(f"{API}/calendario/{sid}", timeout=30).status_code == 404
+
+    def test_tecnico_cannot_create_for_other(self, mk_tecnico):
+        s1, _ = mk_tecnico()
+        _, u2 = mk_tecnico()
+        r = self._mk_slot(s1, data="2026-05-11", tecnico_id=u2["id"])
+        assert r.status_code == 403, f"{r.status_code}: {r.text[:200]}"
+
+    def test_tecnico_cannot_edit_other_slot(self, admin, mk_tecnico):
+        s1, _ = mk_tecnico()
+        r = self._mk_slot(admin, data="2026-05-18")
+        sid = r.json()["slots"][0]["id"]
+        try:
+            assert s1.patch(f"{API}/calendario/{sid}", json={"ora": "07:00"},
+                            timeout=30).status_code == 403
+            assert s1.delete(f"{API}/calendario/{sid}", timeout=30).status_code == 403
+        finally:
+            admin.delete(f"{API}/calendario/{sid}", timeout=30)
+
+
+class TestPrenotazioni:
+    def test_prenota_flow(self, admin, mk_tesserato):
+        r = admin.post(f"{API}/calendario", json={"data": "2026-05-25", "ora": "18:00",
+                                                  "luogo": "TEST", "capacita": 1,
+                                                  "descrizione": "TEST_prenota"}, timeout=30)
+        sid = r.json()["slots"][0]["id"]
+        t1 = mk_tesserato()
+        t2 = mk_tesserato()
+        try:
+            p = admin.post(f"{API}/calendario/prenota",
+                           json={"slot_id": sid, "tesserato_id": t1["id"]}, timeout=120)
+            assert p.status_code == 200, f"{p.status_code}: {p.text[:300]}"
+            slot = next(s for s in admin.get(f"{API}/calendario",
+                        params={"date_from": "2026-05-25", "date_to": "2026-05-25"},
+                        timeout=30).json() if s["id"] == sid)
+            assert len(slot["prenotazioni"]) == 1, slot
+            assert slot["prenotazioni"][0]["tesserato_nome"].startswith("TEST_Rossi"), slot
+            # duplicate booking
+            dup = admin.post(f"{API}/calendario/prenota",
+                             json={"slot_id": sid, "tesserato_id": t1["id"]}, timeout=60)
+            assert dup.status_code == 409, f"{dup.status_code}: {dup.text[:200]}"
+            # slot full (capacita=1)
+            full = admin.post(f"{API}/calendario/prenota",
+                              json={"slot_id": sid, "tesserato_id": t2["id"]}, timeout=60)
+            assert full.status_code == 409, f"{full.status_code}: {full.text[:200]}"
+            # cancel
+            c = admin.delete(f"{API}/calendario/prenota/{sid}/{t1['id']}", timeout=120)
+            assert c.status_code == 200, c.text[:300]
+            slot = next(s for s in admin.get(f"{API}/calendario",
+                        params={"date_from": "2026-05-25", "date_to": "2026-05-25"},
+                        timeout=30).json() if s["id"] == sid)
+            assert slot["prenotazioni"] == [], slot
+            # now t2 fits
+            ok = admin.post(f"{API}/calendario/prenota",
+                            json={"slot_id": sid, "tesserato_id": t2["id"]}, timeout=120)
+            assert ok.status_code == 200, ok.text[:300]
+        finally:
+            admin.delete(f"{API}/calendario/{sid}", timeout=30)
+
+    def test_prenota_invalid_ids(self, admin, mk_tesserato):
+        t = mk_tesserato()
+        r = admin.post(f"{API}/calendario/prenota",
+                       json={"slot_id": "0" * 24, "tesserato_id": t["id"]}, timeout=30)
+        assert r.status_code == 404, r.status_code
+        s = admin.post(f"{API}/calendario", json={"data": "2026-06-01", "ora": "10:00"},
+                       timeout=30).json()["slots"][0]["id"]
+        try:
+            r2 = admin.post(f"{API}/calendario/prenota",
+                            json={"slot_id": s, "tesserato_id": "0" * 24}, timeout=30)
+            assert r2.status_code == 404, r2.status_code
+        finally:
+            admin.delete(f"{API}/calendario/{s}", timeout=30)
+
+
+# ------------------------- ITERATION 4: LIBRO SOCI -------------------------
+class TestLibroSoci:
+    def test_libro_soci_states_and_quota(self, admin, mk_tesserato):
+        from datetime import timedelta
+        future = (datetime.now(timezone.utc) + timedelta(days=200)).date().isoformat()
+        t_active = mk_tesserato(scadenza_tesseramento=future)
+        t_moroso = mk_tesserato()
+        ric = mk_ricevuta(admin, t_active["id"], data=f"{2026}-02-10", items=[
+            {"descrizione": "TEST_Quota tesseramento annuale", "importo": 40.0},
+            {"descrizione": "TEST_Pacchetto 10 lezioni", "importo": 150.0}]).json()
+        try:
+            r = admin.get(f"{API}/libro-soci", params={"anno": 2026}, timeout=60)
+            assert r.status_code == 200, r.text[:300]
+            body = r.json()
+            assert body["anno"] == 2026
+            assert isinstance(body["soci"], list) and body["soci"]
+            by_id = {s["id"]: s for s in body["soci"]}
+            for s in body["soci"]:
+                assert s["stato_socio"] in ("attivo", "moroso", "iscritto (scaduto)"), s
+                assert isinstance(s["quota_pagata_anno"], (int, float))
+                assert s["quota_pagata_anno"] >= 0
+                assert "_id" not in s and "id" in s
+            assert by_id[t_active["id"]]["stato_socio"] == "attivo"
+            assert by_id[t_active["id"]]["quota_pagata_anno"] == pytest.approx(40.0), \
+                by_id[t_active["id"]]["quota_pagata_anno"]
+            assert by_id[t_moroso["id"]]["stato_socio"] == "moroso"
+            assert by_id[t_moroso["id"]]["quota_pagata_anno"] == 0
+        finally:
+            admin.delete(f"{API}/ricevute/{ric['id']}", timeout=30)
+
+    def test_libro_soci_default_anno_and_tecnico_scope(self, admin, mk_tecnico, mk_tesserato):
+        s, _ = mk_tecnico()
+        own = mk_tesserato(session=s)
+        mk_tesserato()
+        r = s.get(f"{API}/libro-soci", timeout=60)
+        assert r.status_code == 200, r.text[:300]
+        body = r.json()
+        assert body["anno"] == datetime.now(timezone.utc).year
+        assert [x["id"] for x in body["soci"]] == [own["id"]], body["soci"]
+
+
+# ------------------------- ITERATION 4: EROGAZIONE COMPENSI -------------------------
+class TestErogazioneCompensi:
+    def test_eroga_creates_movimento_and_record(self, admin, mk_tecnico, mk_tesserato):
+        _, u = mk_tecnico(50.0)
+        t = mk_tesserato()
+        ric = mk_ricevuta(admin, t["id"], data="2026-02-20", emesso_per_id=u["id"],
+                          items=[{"descrizione": "TEST_Pacchetto", "importo": 200.0}]).json()
+        mv_id = None
+        try:
+            c = admin.get(f"{API}/compensi", params={"date_from": "2026-01-01",
+                                                     "date_to": "2026-12-31"}, timeout=60)
+            assert c.status_code == 200, c.text[:300]
+            row = next(x for x in c.json()["compensi"] if x["tecnico_id"] == u["id"])
+            assert row["compenso_dovuto"] == pytest.approx(100.0), row
+            assert row["flusso_generato"] == pytest.approx(200.0)
+
+            e = admin.post(f"{API}/compensi/eroga", json={
+                "tecnico_id": u["id"], "data": "2026-03-01", "importo": 100.0,
+                "periodo_da": "2026-01-01", "periodo_a": "2026-02-28",
+                "metodo": "Bonifico", "note": "TEST_eroga"}, timeout=30)
+            assert e.status_code == 200, f"{e.status_code}: {e.text[:300]}"
+            body = e.json()
+            assert body["ok"] is True
+            mv = body["movimento"]
+            mv_id = mv["id"]
+            assert mv["tipo"] == "uscita" and mv["categoria"] == "Compenso tecnico"
+            assert mv["importo"] == pytest.approx(100.0)
+            assert mv["tecnico_id"] == u["id"]
+            assert "_id" not in mv
+            # persisted in movimenti
+            mvs = admin.get(f"{API}/movimenti", params={"date_from": "2026-03-01",
+                                                        "date_to": "2026-03-01"}, timeout=60).json()
+            found = next(x for x in mvs if x["id"] == mv_id)
+            assert found["categoria"] == "Compenso tecnico"
+            assert found["importo"] == pytest.approx(100.0)
+            # erogati list
+            lst = admin.get(f"{API}/compensi/erogati", params={"tecnico_id": u["id"]}, timeout=30)
+            assert lst.status_code == 200, lst.text[:300]
+            recs = lst.json()
+            assert len(recs) == 1, recs
+            rec = recs[0]
+            assert rec["tecnico_id"] == u["id"] and rec["importo"] == pytest.approx(100.0)
+            assert rec["metodo"] == "Bonifico" and rec["movimento_id"] == mv_id
+            assert rec["tecnico_nome"] == u["name"]
+        finally:
+            if mv_id:
+                admin.delete(f"{API}/movimenti/{mv_id}", timeout=30)
+                _db().compensi_erogati.delete_many({"movimento_id": mv_id})
+            admin.delete(f"{API}/ricevute/{ric['id']}", timeout=30)
+
+    def test_eroga_requires_admin_and_valid_tecnico(self, admin, mk_tecnico):
+        s, u = mk_tecnico()
+        payload = {"tecnico_id": u["id"], "data": "2026-03-01", "importo": 10.0}
+        assert s.post(f"{API}/compensi/eroga", json=payload, timeout=30).status_code == 403
+        bad = admin.post(f"{API}/compensi/eroga",
+                         json={"tecnico_id": "0" * 24, "data": "2026-03-01", "importo": 10.0},
+                         timeout=30)
+        assert bad.status_code == 404, bad.status_code
+
+    def test_erogati_scoped_for_tecnico(self, mk_tecnico):
+        s, _ = mk_tecnico()
+        r = s.get(f"{API}/compensi/erogati", timeout=30)
+        assert r.status_code == 200, r.text[:300]
+        assert r.json() == []
+
+
+# ------------------------- ITERATION 4: EXCEL EXPORT -------------------------
+class TestExcelExport:
+    def test_export_excel_admin(self, admin):
+        r = admin.get(f"{API}/export/excel", timeout=180)
+        assert r.status_code == 200, f"{r.status_code}: {r.text[:300]}"
+        assert r.headers.get("content-type", "").startswith(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), r.headers
+        cd = r.headers.get("content-disposition", "")
+        assert "attachment" in cd and ".xlsx" in cd, cd
+        assert r.content[:2] == b"PK", r.content[:10]
+        import io
+        import zipfile
+        with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+            assert any(n.startswith("xl/worksheets") for n in z.namelist()), z.namelist()
+
+    def test_export_excel_forbidden_for_tecnico(self, mk_tecnico):
+        s, _ = mk_tecnico()
+        r = s.get(f"{API}/export/excel", timeout=120)
+        assert r.status_code == 403, r.status_code
+
+    def test_export_excel_unauthenticated(self):
+        r = requests.get(f"{API}/export/excel", timeout=60)
+        assert r.status_code == 401, r.status_code
+
+
+# ------------------------- ITERATION 4: ORG PRESIDENT NAME -------------------------
+class TestPresidentName:
+    def test_president_name_is_set(self, admin):
+        r = admin.get(f"{API}/organizzazione", timeout=30)
+        assert r.status_code == 200, r.text[:300]
+        assert r.json().get("president_name") == "Drovetti Cassiano Bruno", r.json().get("president_name")
+
+
+# ------------------------- ITERATION 5: TARGETED FIX VERIFICATION -------------------------
+def _pdf_text(content: bytes) -> str:
+    """Best-effort text extraction: inflate every (ASCII85+Flate) stream in the PDF."""
+    import base64
+    import re
+    import zlib
+    out = [content.decode("latin-1", "ignore")]
+    for m in re.finditer(rb"stream\r?\n(.*?)endstream", content, re.S):
+        raw = m.group(1).strip(b"\r\n")
+        for dec in (lambda b: zlib.decompress(b),
+                    lambda b: zlib.decompress(base64.a85decode(b, adobe=True))):
+            try:
+                out.append(dec(raw).decode("latin-1"))
+                break
+            except Exception:
+                continue
+    return "\n".join(out)
+
+
+class TestIter5PresidentName:
+    """Fix 1: startup $set migration of organizzazione.president_name."""
+
+    def test_get_organizzazione_president_name(self, admin):
+        r = admin.get(f"{API}/organizzazione", timeout=30)
+        assert r.status_code == 200, r.text[:300]
+        assert r.json().get("president_name") == PRESIDENT_NAME, r.json().get("president_name")
+
+    def test_president_name_in_receipt_pdf(self, admin, mk_tesserato):
+        t = mk_tesserato()
+        d = mk_ricevuta(admin, t["id"], data="2026-07-02").json()
+        try:
+            pdf = admin.get(f"{API}/ricevute/{d['id']}/pdf", timeout=60)
+            assert pdf.status_code == 200, pdf.text[:200]
+            assert pdf.content[:4] == b"%PDF"
+            txt = _pdf_text(pdf.content)
+            assert "Drovetti" in txt, txt[-1500:]
+            assert "Drovelli" not in txt
+        finally:
+            admin.delete(f"{API}/ricevute/{d['id']}", timeout=30)
+
+    def test_migration_recreates_correct_name_on_fresh_doc(self, admin):
+        """Deleting the config doc must lazily recreate it with the correct name."""
+        db = _db()
+        old = db.organizzazione.find_one({"_id": "config"})
+        db.organizzazione.delete_one({"_id": "config"})
+        try:
+            r = admin.get(f"{API}/organizzazione", timeout=30)
+            assert r.status_code == 200, r.text[:300]
+            assert r.json().get("president_name") == PRESIDENT_NAME, r.json()
+        finally:
+            db.organizzazione.delete_one({"_id": "config"})
+            if old:
+                db.organizzazione.insert_one(old)
+
+
+class TestIter5CalendarValidation:
+    """Fix 2: malformed calendar payloads must be 4xx (was 500)."""
+
+    def test_non_iso_date_422(self, admin):
+        r = admin.post(f"{API}/calendario",
+                       json={"data": "01/03/2026", "ora": "18:00"}, timeout=30)
+        assert r.status_code == 422, f"{r.status_code}: {r.text[:300]}"
+
+    def test_bad_recurrence_end_422(self, admin):
+        r = admin.post(f"{API}/calendario",
+                       json={"data": "2026-07-01", "ora": "18:00",
+                             "ricorrenza_settimanale": True,
+                             "ricorrenza_fino_al": "nope"}, timeout=30)
+        assert r.status_code == 422, f"{r.status_code}: {r.text[:300]}"
+
+    def test_negative_durata_422(self, admin):
+        r = admin.post(f"{API}/calendario",
+                       json={"data": "2026-07-01", "ora": "18:00", "durata_min": -10},
+                       timeout=30)
+        assert r.status_code == 422, f"{r.status_code}: {r.text[:300]}"
+
+    def test_zero_capacita_422(self, admin):
+        r = admin.post(f"{API}/calendario",
+                       json={"data": "2026-07-01", "ora": "18:00", "capacita": 0},
+                       timeout=30)
+        assert r.status_code == 422, f"{r.status_code}: {r.text[:300]}"
+
+    def test_negative_capacita_422(self, admin):
+        r = admin.post(f"{API}/calendario",
+                       json={"data": "2026-07-01", "ora": "18:00", "capacita": -3},
+                       timeout=30)
+        assert r.status_code == 422, f"{r.status_code}: {r.text[:300]}"
+
+    def test_no_slot_created_after_invalid_payloads(self, admin):
+        lst = admin.get(f"{API}/calendario", params={"date_from": "2026-07-01",
+                                                     "date_to": "2026-07-01"}, timeout=30)
+        assert lst.status_code == 200
+        assert lst.json() == [], lst.json()
+
+    def test_valid_payload_still_works(self, admin):
+        r = admin.post(f"{API}/calendario",
+                       json={"data": "2026-07-08", "ora": "18:00", "durata_min": 60,
+                             "capacita": 4, "descrizione": "TEST_iter5_ok"}, timeout=30)
+        assert r.status_code == 200, r.text[:300]
+        sid = r.json()["slots"][0]["id"]
+        admin.delete(f"{API}/calendario/{sid}", timeout=30)
+
+
+class TestIter5PrenotaAsync:
+    """Fix 3: notifications moved to BackgroundTasks -> response must be fast."""
+
+    def test_five_bookings_under_2s_each(self, admin, mk_tesserato):
+        import time
+        r = admin.post(f"{API}/calendario",
+                       json={"data": "2026-07-15", "ora": "18:00", "luogo": "TEST",
+                             "capacita": 10, "descrizione": "TEST_iter5_async"}, timeout=30)
+        assert r.status_code == 200, r.text[:300]
+        sid = r.json()["slots"][0]["id"]
+        tess = [mk_tesserato() for _ in range(5)]
+        durations = []
+        try:
+            for t in tess:
+                t0 = time.perf_counter()
+                p = admin.post(f"{API}/calendario/prenota",
+                               json={"slot_id": sid, "tesserato_id": t["id"]}, timeout=60)
+                el = time.perf_counter() - t0
+                durations.append(el)
+                assert p.status_code == 200, f"{p.status_code}: {p.text[:200]}"
+            print("prenota durations:", [round(d, 3) for d in durations])
+            assert all(d < 2.0 for d in durations), durations
+            # cancel must also be fast (notifications are background too)
+            t0 = time.perf_counter()
+            c = admin.delete(f"{API}/calendario/prenota/{sid}/{tess[0]['id']}", timeout=60)
+            el = time.perf_counter() - t0
+            assert c.status_code == 200, c.text[:200]
+            print("cancel duration:", round(el, 3))
+            assert el < 2.0, el
+        finally:
+            admin.delete(f"{API}/calendario/{sid}", timeout=30)
+
+
+class TestIter5CancelPrenotazione:
+    """Fix 4: cancelling a non-existent prenotazione -> 404."""
+
+    def test_cancel_not_booked_404_then_booked_200(self, admin, mk_tesserato):
+        r = admin.post(f"{API}/calendario",
+                       json={"data": "2026-07-22", "ora": "18:00", "capacita": 3,
+                             "descrizione": "TEST_iter5_cancel"}, timeout=30)
+        sid = r.json()["slots"][0]["id"]
+        t = mk_tesserato()
+        try:
+            miss = admin.delete(f"{API}/calendario/prenota/{sid}/{t['id']}", timeout=60)
+            assert miss.status_code == 404, f"{miss.status_code}: {miss.text[:200]}"
+            assert admin.post(f"{API}/calendario/prenota",
+                              json={"slot_id": sid, "tesserato_id": t["id"]},
+                              timeout=60).status_code == 200
+            ok = admin.delete(f"{API}/calendario/prenota/{sid}/{t['id']}", timeout=60)
+            assert ok.status_code == 200, ok.text[:200]
+            # second cancel is now a miss again
+            again = admin.delete(f"{API}/calendario/prenota/{sid}/{t['id']}", timeout=60)
+            assert again.status_code == 404, again.status_code
+            slot = next(s for s in admin.get(f"{API}/calendario",
+                        params={"date_from": "2026-07-22", "date_to": "2026-07-22"},
+                        timeout=30).json() if s["id"] == sid)
+            assert slot["prenotazioni"] == [], slot
+        finally:
+            admin.delete(f"{API}/calendario/{sid}", timeout=30)
+
+    def test_cancel_unknown_slot_404(self, admin, mk_tesserato):
+        t = mk_tesserato()
+        r = admin.delete(f"{API}/calendario/prenota/{'0' * 24}/{t['id']}", timeout=30)
+        assert r.status_code == 404, r.status_code
+
+
+class TestIter5ErogaValidation:
+    """Fix 5: importo > 0 and target user must be a tecnico."""
+
+    def test_negative_importo_422(self, admin, mk_tecnico):
+        _, u = mk_tecnico()
+        r = admin.post(f"{API}/compensi/eroga",
+                       json={"tecnico_id": u["id"], "data": "2026-03-01", "importo": -50},
+                       timeout=30)
+        assert r.status_code == 422, f"{r.status_code}: {r.text[:300]}"
+
+    def test_zero_importo_422(self, admin, mk_tecnico):
+        _, u = mk_tecnico()
+        r = admin.post(f"{API}/compensi/eroga",
+                       json={"tecnico_id": u["id"], "data": "2026-03-01", "importo": 0},
+                       timeout=30)
+        assert r.status_code == 422, f"{r.status_code}: {r.text[:300]}"
+
+    def test_eroga_to_admin_422(self, admin):
+        me = admin.get(f"{API}/auth/me", timeout=30).json()
+        admin_id = me.get("id") or me.get("user", {}).get("id")
+        assert admin_id, me
+        r = admin.post(f"{API}/compensi/eroga",
+                       json={"tecnico_id": admin_id, "data": "2026-03-01", "importo": 50},
+                       timeout=30)
+        assert r.status_code == 422, f"{r.status_code}: {r.text[:300]}"
+
+    def test_no_side_effects_from_invalid_eroga(self, admin):
+        mvs = admin.get(f"{API}/movimenti", params={"date_from": "2026-03-01",
+                                                    "date_to": "2026-03-01"}, timeout=60).json()
+        assert [m for m in mvs if m.get("importo", 0) < 0] == [], mvs
+        assert _db().compensi_erogati.count_documents({"importo": {"$lte": 0}}) == 0
+
+    def test_valid_eroga_still_200(self, admin, mk_tecnico):
+        _, u = mk_tecnico(50.0)
+        e = admin.post(f"{API}/compensi/eroga",
+                       json={"tecnico_id": u["id"], "data": "2026-03-02", "importo": 75.5,
+                             "metodo": "Contanti", "note": "TEST_iter5_eroga"}, timeout=30)
+        assert e.status_code == 200, f"{e.status_code}: {e.text[:300]}"
+        mv_id = e.json()["movimento"]["id"]
+        try:
+            recs = admin.get(f"{API}/compensi/erogati",
+                             params={"tecnico_id": u["id"]}, timeout=30).json()
+            assert len(recs) == 1 and recs[0]["importo"] == pytest.approx(75.5), recs
+        finally:
+            admin.delete(f"{API}/movimenti/{mv_id}", timeout=30)
+            _db().compensi_erogati.delete_many({"movimento_id": mv_id})
+
+
+
+# ------------------------- ITER 6: libro-soci PDF export + pdf_utils regression -------------------------
+def _pdf_text(content: bytes) -> str:
+    """Extract full text from a PDF byte string (validates it is decodable)."""
+    from pypdf import PdfReader
+    reader = PdfReader(BytesIO(content))
+    return "\n".join((p.extract_text() or "") for p in reader.pages)
+
+
+class TestIter6BackendHealth:
+    """Backend module loads cleanly after the pdf_utils IndentationError fix."""
+
+    def test_pdf_utils_imports_all_generators(self):
+        import importlib
+        m = importlib.import_module("pdf_utils")
+        for fn in ("generate_receipt_pdf", "generate_balance_report_pdf",
+                   "generate_libro_soci_pdf"):
+            assert callable(getattr(m, fn, None)), f"{fn} missing from pdf_utils"
+
+    def test_auth_me_unauthenticated_401(self):
+        r = requests.get(f"{API}/auth/me", timeout=30)
+        assert r.status_code == 401, f"{r.status_code}: {r.text[:200]}"
+
+    def test_root_no_500(self):
+        r = requests.get(f"{BASE_URL}/", timeout=30)
+        assert r.status_code < 500, f"{r.status_code}: {r.text[:200]}"
+
+    def test_organizzazione_president_name(self, admin):
+        r = admin.get(f"{API}/organizzazione", timeout=30)
+        assert r.status_code == 200, r.text[:300]
+        assert r.json().get("president_name") == PRESIDENT_NAME, r.json().get("president_name")
+
+
+class TestIter6LibroSociPdf:
+    def test_pdf_unauthenticated_401(self):
+        r = requests.get(f"{API}/libro-soci/pdf", params={"anno": 2026}, timeout=60)
+        assert r.status_code == 401, f"{r.status_code}: {r.text[:200]}"
+
+    def test_admin_pdf_valid_and_headers(self, admin, mk_tesserato):
+        t = mk_tesserato(numero_tessera="T6-001", scadenza_tesseramento="2026-12-31")
+        r = admin.get(f"{API}/libro-soci/pdf", params={"anno": 2026}, timeout=120)
+        assert r.status_code == 200, f"{r.status_code}: {r.text[:300]}"
+        assert r.headers.get("content-type", "").startswith("application/pdf"), r.headers
+        assert "LibroSoci_2026.pdf" in r.headers.get("content-disposition", ""), r.headers
+        assert r.content[:4] == b"%PDF", r.content[:20]
+        txt = _pdf_text(r.content)
+        assert "LIBRO SOCI" in txt.upper(), txt[:500]
+        assert "2026" in txt
+        assert "RIEPILOGO" in txt.upper() and "ELENCO SOCI" in txt.upper(), txt[:800]
+        assert t["cognome"].split("_")[-1] in txt or "T6-001" in txt, txt[:1500]
+
+    def test_pdf_default_anno(self, admin):
+        r = admin.get(f"{API}/libro-soci/pdf", timeout=120)
+        assert r.status_code == 200, f"{r.status_code}: {r.text[:300]}"
+        assert f"LibroSoci_{YEAR}.pdf" in r.headers.get("content-disposition", ""), r.headers
+        assert r.content[:4] == b"%PDF"
+
+    def test_pdf_stats_match_json(self, admin):
+        j = admin.get(f"{API}/libro-soci", params={"anno": 2026}, timeout=120).json()
+        soci = j["soci"]
+        attivi = sum(1 for s in soci if s.get("stato_socio") == "attivo")
+        r = admin.get(f"{API}/libro-soci/pdf", params={"anno": 2026}, timeout=120)
+        assert r.status_code == 200
+        txt = _pdf_text(r.content).replace("\n", " ")
+        assert re.search(r"Soci totali\s*" + str(len(soci)), txt), txt[:800]
+        assert re.search(r"Attivi\s*" + str(attivi), txt), txt[:800]
+
+    def test_tecnico_pdf_scoped_to_own_tesserati(self, admin, mk_tecnico, mk_tesserato):
+        s, _u = mk_tecnico()
+        own = mk_tesserato(session=s, cognome="TEST_TecOwn", numero_tessera="T6-TEC")
+        other = mk_tesserato(cognome="TEST_AdminOnly", numero_tessera="T6-ADM")
+        r = s.get(f"{API}/libro-soci/pdf", params={"anno": 2026}, timeout=120)
+        assert r.status_code == 200, f"{r.status_code}: {r.text[:300]}"
+        assert r.content[:4] == b"%PDF"
+        txt = _pdf_text(r.content)
+        assert "T6-TEC" in txt, f"own tesserato missing: {txt[:1500]}"
+        assert "T6-ADM" not in txt, "tecnico PDF leaked another user's tesserato"
+        assert own["id"] and other["id"]
+
+    def test_pdf_anno_without_data_still_valid(self, admin):
+        r = admin.get(f"{API}/libro-soci/pdf", params={"anno": 1999}, timeout=120)
+        assert r.status_code == 200, f"{r.status_code}: {r.text[:300]}"
+        assert r.content[:4] == b"%PDF"
+        assert "Anno associativo" in _pdf_text(r.content) or "1999" in _pdf_text(r.content)
+
+
+class TestIter6PdfRegression:
+    def test_ricevuta_pdf_still_works(self, admin, mk_tesserato):
+        t = mk_tesserato()
+        rc = mk_ricevuta(admin, t["id"])
+        assert rc.status_code in (200, 201), rc.text[:300]
+        rid = rc.json()["id"]
+        try:
+            r = admin.get(f"{API}/ricevute/{rid}/pdf", timeout=120)
+            assert r.status_code == 200, f"{r.status_code}: {r.text[:300]}"
+            assert r.content[:4] == b"%PDF"
+            assert "RICEVUTA" in _pdf_text(r.content).upper()
+        finally:
+            admin.delete(f"{API}/ricevute/{rid}", timeout=30)
+
+    def test_bilancio_pdf_still_works(self, admin):
+        r = admin.get(f"{API}/report/bilancio/pdf",
+                      params={"date_from": "2026-01-01", "date_to": "2026-12-31"}, timeout=120)
+        assert r.status_code == 200, f"{r.status_code}: {r.text[:300]}"
+        assert r.content[:4] == b"%PDF"
+        txt = _pdf_text(r.content).upper()
+        assert "REPORT BILANCIO" in txt or "BILANCIO" in txt, txt[:500]

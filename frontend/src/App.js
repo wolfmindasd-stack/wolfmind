@@ -12,6 +12,8 @@ import Movimenti from "./pages/Movimenti";
 import Compensi from "./pages/Compensi";
 import Report from "./pages/Report";
 import Admin from "./pages/Admin";
+import Calendario from "./pages/Calendario";
+import LibroSoci from "./pages/LibroSoci";
 
 const Loader = () => (
   <div className="min-h-screen flex items-center justify-center bg-[#050505] text-white/60">
@@ -42,8 +44,10 @@ export default function App() {
           <Route path="/login" element={<LoginRoute />} />
           <Route path="/" element={<Protected><Dashboard /></Protected>} />
           <Route path="/tesserati" element={<Protected><Tesserati /></Protected>} />
+          <Route path="/libro-soci" element={<Protected><LibroSoci /></Protected>} />
           <Route path="/ricevute" element={<Protected><Ricevute /></Protected>} />
           <Route path="/abbonamenti" element={<Protected><Abbonamenti /></Protected>} />
+          <Route path="/calendario" element={<Protected><Calendario /></Protected>} />
           <Route path="/movimenti" element={<Protected><Movimenti /></Protected>} />
           <Route path="/compensi" element={<Protected><Compensi /></Protected>} />
           <Route path="/report" element={<Protected><Report /></Protected>} />

@@ -140,16 +140,18 @@ export default function Ricevute() {
     try {
       await api.post(`/ricevute/${selectedRid}/send-email`,
         { email: emailTo, message: emailMessage });
-      toast.success("Email inviata"); setEmailOpen(false);
+      toast.success("Email inviata con link alla ricevuta"); setEmailOpen(false);
+      load();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
 
   const shareWhatsApp = async (r) => {
     try {
-      await downloadPdf(r);
       const { data } = await api.get(`/ricevute/${r.id}/whatsapp-link`);
       window.open(data.url, "_blank");
-      toast.info("PDF scaricato. Allegalo al messaggio WhatsApp.");
+      await api.post(`/ricevute/${r.id}/mark-whatsapp`);
+      toast.info("Link ricevuta incluso nel messaggio WhatsApp.");
+      load();
     } catch (e) { toast.error("Errore WhatsApp"); }
   };
 
@@ -210,13 +212,19 @@ export default function Ricevute() {
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => openEmail(r)}
                     data-testid={`email-ricevuta-${r.id}`}
-                    className="border-[#007AFF]/40 text-[#007AFF] hover:bg-[#007AFF]/10 h-8">
-                    <Mail size={13} className="mr-1" /> Email
+                    className={`h-8 ${r.last_sent_email_at ?
+                      "border-[#34C759] text-[#34C759] hover:bg-[#34C759]/10 bg-[#34C759]/5" :
+                      "border-[#007AFF]/40 text-[#007AFF] hover:bg-[#007AFF]/10"}`}>
+                    <Mail size={13} className="mr-1" />
+                    {r.last_sent_email_at ? "Inviata" : "Email"}
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => shareWhatsApp(r)}
                     data-testid={`whatsapp-${r.id}`}
-                    className="border-[#25D366]/40 text-[#25D366] hover:bg-[#25D366]/10 h-8">
-                    <MessageCircle size={13} className="mr-1" /> WhatsApp
+                    className={`h-8 ${r.last_sent_whatsapp_at ?
+                      "border-[#25D366] text-white bg-[#25D366]/20 hover:bg-[#25D366]/30" :
+                      "border-[#25D366]/40 text-[#25D366] hover:bg-[#25D366]/10"}`}>
+                    <MessageCircle size={13} className="mr-1" />
+                    {r.last_sent_whatsapp_at ? "Condivisa" : "WhatsApp"}
                   </Button>
                   {isAdmin && (
                     <>

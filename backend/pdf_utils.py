@@ -243,7 +243,7 @@ def generate_receipt_pdf(receipt: dict, tesserato: dict, org: dict,
             "pr", fontSize=10, alignment=TA_CENTER, fontName="Helvetica-Bold")),
     ], [
         "",
-        Paragraph(f"<i>{org.get('president_name', 'Drovelli Caivano Bruno')}</i>",
+        Paragraph(f"<i>{org.get('president_name', 'Drovetti Cassiano Bruno')}</i>",
                   ParagraphStyle("pn", fontSize=10, alignment=TA_CENTER,
                                  fontName="Helvetica-Oblique")),
     ]]
@@ -261,6 +261,85 @@ def generate_receipt_pdf(receipt: dict, tesserato: dict, org: dict,
     return buf.getvalue()
 
 
+def generate_libro_soci_pdf(org: dict, anno: int, soci: list, totali: dict) -> bytes:
+    """Generate a Libro Soci PDF with member list and status."""
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12 * mm, rightMargin=12 * mm,
+                            topMargin=15 * mm, bottomMargin=15 * mm)
+    st = _make_styles()
+    story = [_header(org, st), Spacer(1, 8 * mm),
+             Paragraph("LIBRO SOCI", st["title"]),
+             Spacer(1, 4 * mm),
+             Paragraph(f"Anno associativo: <b>{anno}</b>", st["period"]),
+             Spacer(1, 6 * mm)]
+
+    # Riepilogo statistico
+    story.append(_section_bar("RIEPILOGO", st))
+    r_rows = [[Paragraph("<b>Soci totali</b>", st["val"]),
+               Paragraph(str(totali.get("totali", 0)),
+                         ParagraphStyle("v1", fontSize=11, alignment=TA_RIGHT, fontName="Helvetica-Bold"))],
+              [Paragraph("<b>Attivi</b>", st["val"]),
+               Paragraph(str(totali.get("attivi", 0)),
+                         ParagraphStyle("v2", fontSize=11, alignment=TA_RIGHT,
+                                         textColor=colors.HexColor("#059669"),
+                                         fontName="Helvetica-Bold"))],
+              [Paragraph("<b>Scaduti / morosi</b>", st["val"]),
+               Paragraph(str(totali.get("morosi_scaduti", 0)),
+                         ParagraphStyle("v3", fontSize=11, alignment=TA_RIGHT,
+                                         textColor=colors.HexColor("#DC2626"),
+                                         fontName="Helvetica-Bold"))],
+              [Paragraph(f"<b>Quote incassate {anno}</b>", st["val"]),
+               Paragraph(_fmt_eur(totali.get("quote_totali", 0)),
+                         ParagraphStyle("v4", fontSize=12, alignment=TA_RIGHT,
+                                         fontName="Helvetica-Bold", textColor=PRIMARY))]]
+    rt = Table(r_rows, colWidths=[130 * mm, 56 * mm])
+    rt.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.5, BORDER),
+                             ("INNERGRID", (0, 0), (-1, -1), 0.3, BORDER),
+                             ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                             ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                             ("TOPPADDING", (0, 0), (-1, -1), 5),
+                             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                             ("BACKGROUND", (0, 3), (-1, 3), LIGHT)]))
+    story.append(rt); story.append(Spacer(1, 6 * mm))
+
+    story.append(_section_bar("ELENCO SOCI", st))
+    rows = [[Paragraph("<b>N. Tess.</b>", ParagraphStyle("h1", fontSize=8, fontName="Helvetica-Bold")),
+             Paragraph("<b>Cognome e Nome</b>", ParagraphStyle("h2", fontSize=8, fontName="Helvetica-Bold")),
+             Paragraph("<b>Codice Fiscale</b>", ParagraphStyle("h3", fontSize=8, fontName="Helvetica-Bold")),
+             Paragraph("<b>Città</b>", ParagraphStyle("h4", fontSize=8, fontName="Helvetica-Bold")),
+             Paragraph("<b>Scadenza tess.</b>", ParagraphStyle("h5", fontSize=8, fontName="Helvetica-Bold")),
+             Paragraph("<b>Stato</b>", ParagraphStyle("h6", fontSize=8, fontName="Helvetica-Bold")),
+             Paragraph("<b>Quota</b>",
+                       ParagraphStyle("h7", fontSize=8, fontName="Helvetica-Bold", alignment=TA_RIGHT))]]
+    row_style = ParagraphStyle("r", fontSize=8, textColor=TEXT, leading=10)
+    for s in soci:
+        stato = s.get("stato_socio", "moroso")
+        color_hex = "#059669" if stato == "attivo" else ("#F59E0B" if "scaduto" in stato else "#DC2626")
+        rows.append([
+            Paragraph(s.get("numero_tessera") or "—", row_style),
+            Paragraph(f"{s.get('cognome','')} {s.get('nome','')}", row_style),
+            Paragraph(s.get("codice_fiscale", "").upper(), ParagraphStyle("cf", fontSize=7, textColor=TEXT, fontName="Courier")),
+            Paragraph(s.get("citta", ""), row_style),
+            Paragraph(_fmt_date(s.get("scadenza_tesseramento")), row_style),
+            Paragraph(f"<font color='{color_hex}'>{stato}</font>", row_style),
+            Paragraph(_fmt_eur(s.get("quota_pagata_anno", 0)) if s.get("quota_pagata_anno") else "—",
+                       ParagraphStyle("q", fontSize=8, alignment=TA_RIGHT, textColor=TEXT)),
+        ])
+    tbl = Table(rows, colWidths=[18 * mm, 45 * mm, 34 * mm, 28 * mm, 22 * mm, 22 * mm, 17 * mm],
+                repeatRows=1)
+    tbl.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), LIGHT),
+                              ("GRID", (0, 0), (-1, -1), 0.3, BORDER),
+                              ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                              ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                              ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                              ("TOPPADDING", (0, 0), (-1, -1), 3),
+                              ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
+    story.append(tbl)
+    story.append(Spacer(1, 8 * mm))
+    story.append(Paragraph(_footer_text(org), st["center_small"]))
+    doc.build(story)
+    return buf.getvalue()
+
 def generate_balance_report_pdf(org: dict, movimenti: list, date_from: str,
                                  date_to: str, totali: dict) -> bytes:
     buf = BytesIO()
@@ -270,7 +349,7 @@ def generate_balance_report_pdf(org: dict, movimenti: list, date_from: str,
     story = [_header(org, st), Spacer(1, 8 * mm),
              Paragraph("REPORT BILANCIO", st["title"]),
              Spacer(1, 4 * mm),
-             Paragraph(f"Periodo: <b>{_fmt_date(date_from)}</b> — <b>{_fmt_date(date_to)}</b>", st["period"]),
+             Paragraph(f"Periodo: <b>{_fmt_date(date_from)}</b> - <b>{_fmt_date(date_to)}</b>", st["period"]),
              Spacer(1, 8 * mm)]
 
     story.append(_section_bar("RIEPILOGO", st))
@@ -298,7 +377,6 @@ def generate_balance_report_pdf(org: dict, movimenti: list, date_from: str,
                              ("BACKGROUND", (0, 2), (-1, 2), LIGHT)]))
     story.append(rt); story.append(Spacer(1, 6 * mm))
 
-    # Aggregation by month
     by_month = {}
     for m in movimenti:
         ym = (m.get("data") or "")[:7]
@@ -368,3 +446,4 @@ def generate_balance_report_pdf(org: dict, movimenti: list, date_from: str,
     story.append(Paragraph(_footer_text(org), st["center_small"]))
     doc.build(story)
     return buf.getvalue()
+
