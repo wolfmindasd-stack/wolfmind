@@ -9,6 +9,7 @@ import {
   Menu, X,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
+import InstallPWAButton from "./InstallPWAButton";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testid: "nav-dashboard" },
@@ -103,6 +104,7 @@ export default function Layout({ children }) {
             <FileSpreadsheet size={16} /> Backup Excel
           </button>
         )}
+        <InstallPWAButton />
         <button onClick={handleLogout} data-testid="logout-btn"
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md
                      border border-white/10 text-sm text-white/70 hover:text-white

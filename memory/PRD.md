@@ -22,3 +22,12 @@ FastAPI + MongoDB + React 19 + Tailwind + Shadcn + reportlab (PDF) + Resend (ema
 - Compensi tecnici % su flusso
 - Report Bilancio PDF export
 - Pannello Admin: utenti, pacchetti, dati organizzazione, logo upload
+- Responsive design (drawer mobile, tablet, desktop)
+- Verbali & Assemblee, Portale Tesserato, Solleciti automatici (CRON), Compensi PDF (busta paga)
+- Libro Soci PDF export
+- **PWA (2026-02)**: manifest.json + service worker + install prompt (Android/iOS via "Aggiungi a Home"), icone 192/512/maskable, meta tag apple-mobile-web-app-*, pulsante "Installa App" nella sidebar e nel login
+
+## Roadmap / Backlog
+- P2: WhatsApp Business API (invio automatico senza wa.me manuale)
+- P2: Push notifications tramite service worker per solleciti in-app
+- P3: Modalità offline avanzata (cache read-only tesserati/abbonamenti)

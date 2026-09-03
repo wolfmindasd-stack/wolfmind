@@ -21,3 +21,24 @@ root.render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+
+// --- PWA: register service worker & capture install prompt ---
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/sw.js")
+      .catch((err) => console.warn("[PWA] SW registration failed:", err));
+  });
+}
+
+// Cache the install-prompt event so a UI button can trigger it later.
+window.deferredPWAInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  window.deferredPWAInstallPrompt = e;
+  window.dispatchEvent(new Event("pwa-installable"));
+});
+window.addEventListener("appinstalled", () => {
+  window.deferredPWAInstallPrompt = null;
+  window.dispatchEvent(new Event("pwa-installed"));
+});

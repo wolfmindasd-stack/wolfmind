@@ -6,6 +6,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { formatApiErrorDetail } from "../lib/api";
 import { Loader2 } from "lucide-react";
+import InstallPWAButton from "../components/InstallPWAButton";
 
 export default function Login() {
   const { login } = useAuth();
@@ -71,6 +72,13 @@ export default function Login() {
 
         <div className="mt-6 text-center text-xs text-white/40">
           Contatta l'amministratore se hai dimenticato le credenziali.
+        </div>
+
+        <div className="mt-6">
+          <InstallPWAButton />
+          <div className="text-center text-[11px] text-white/40 mt-1">
+            Installa l'app sul tuo smartphone per un accesso rapido a schermo intero.
+          </div>
         </div>
       </div>
     </div>
