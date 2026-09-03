@@ -1,0 +1,104 @@
+{
+  "theme": "dark",
+  "archetype": "THE PERFORMANCE PRO (Elite Athleticism & Precision)",
+  "typography": {
+    "headings": {
+      "font": "Chivo",
+      "weights": ["800", "900"],
+      "usage": "Use tight letter spacing (tracking-tight) for large headings to create a heavy-weight, athletic feel. Do not use generic sans for headings."
+    },
+    "body": {
+      "font": "IBM Plex Sans",
+      "weights": ["400", "500", "600"],
+      "usage": "Use for all data tables, inputs, and dense UI components to ensure maximum legibility of financial and personal data."
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl font-black tracking-tighter",
+      "h2": "text-2xl sm:text-3xl font-bold tracking-tight",
+      "h3": "text-xl sm:text-2xl font-bold",
+      "h4": "text-lg font-bold",
+      "body": "text-base",
+      "labels": "text-xs font-bold uppercase tracking-[0.2em]"
+    }
+  },
+  "colors": {
+    "background": "#050505",
+    "surface": "#0F0F13",
+    "surface_hover": "#1A1A24",
+    "primary": "#007AFF",
+    "primary_hover": "#005BB5",
+    "accent_alert": "#FF3B30",
+    "accent_success": "#34C759",
+    "accent_pending": "#FFCC00",
+    "text_primary": "#FFFFFF",
+    "text_secondary": "#A1A1AA",
+    "border": "#27272A",
+    "rules": "Never use pure #000000 for surfaces. Always use slightly blue-tinted grays. Primary color is used sparingly for CTAs. Alerts use Electric Blaze."
+  },
+  "visual_enhancers": {
+    "surfaces": "Grid Borders (The Technical Look). Expose the skeleton. Data-heavy dashboards should use flat backgrounds with 1px subtle borders (border-white/10).",
+    "shadows": "Minimal. Use 1px inner strokes instead of soft shadows to ground elements.",
+    "glassmorphism": "Only for sticky headers/navs: bg-black/60 with backdrop-blur-xl and border-b border-white/10."
+  },
+  "layouts": {
+    "dashboard_grid": "High Density Grid (Mode B). grid-cols-1 md:grid-cols-3 lg:grid-cols-4 with gap-4 or gap-6. Every pixel must be utilized. Cards should stretch full height.",
+    "spacing": "Generous spacing philosophy (p-6, p-8) for forms and isolated components, tight density for data tables.",
+    "alignment": "Left-align dense content, forms, and tables. Optical alignment for icons."
+  },
+  "component_rules": {
+    "cards": "Cardless or sharp rectangles. Flat background, 1px border, no shadow by default. Hover states lift slightly with border color change.",
+    "forms": "Use Shadcn components (Input, Select, Form). Inputs should have dark backgrounds with clear focus rings (focus:ring-2 focus:ring-primary).",
+    "tables": "Dense, highly scannable tables for 'Tesserati' and 'Movimenti'. Striped rows or clear hover states. Left align text, right align currency.",
+    "buttons": "Sharp corners or slight radius (rounded-md). High contrast text. Always define hover:bg and hover:text explicitly.",
+    "modals": "Backdrop blur on overlay. Sharp edges for the dialog window."
+  },
+  "motion": {
+    "interactions": "Hover states on all interactive elements. Focus states for accessibility.",
+    "transitions": "Use specific properties (transition-colors, transition-transform) with duration-200. NO transition-all.",
+    "loading": "Use skeleton loaders for tables and charts."
+  },
+  "accessibility": {
+    "contrast": "Ensure minimum 4.5:1 ratio for normal text.",
+    "testing": "All interactive and key informational elements MUST include a data-testid attribute in kebab-case based on role (e.g., data-testid='login-submit-button').",
+    "focus": "Clear focus rings on all inputs and buttons."
+  },
+  "media": {
+    "icons_library": "Phosphor Icons (@phosphor-icons/react) for a technical, high-end look suitable for dense dashboards.",
+    "image_urls": [
+      {
+        "url": "https://images.unsplash.com/photo-1730818876690-d0861637bad2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA4Mzl8MHwxfHNlYXJjaHwxfHx3b2xmJTIwbG9nb3xlbnwwfHx8fDE3ODgzOTM5OTZ8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Phone with wolf logo",
+        "category": "placeholder_logo"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1525198104776-f6e8a873f9b7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTF8MHwxfHNlYXJjaHwzfHxtYXJ0aWFsJTIwYXJ0cyUyMHRyYWluaW5nfGVufDB8fHx8MTc4ODM5NDAwMXww&ixlib=rb-4.1.0&q=85",
+        "description": "Person wearing black belt judo in dramatic lighting",
+        "category": "login_background"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1606335544053-c43609e6155d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w7NTY2Nzh8MHwxfHNlYXJjaHwxfHxhdGhsZXRpYyUyMHBlcnNvbiUyMHBvcnRyYWl0fGVufDB8fHx8MTc4ODM5NDAwNnww&ixlib=rb-4.1.0&q=85",
+        "description": "Athletic man portrait",
+        "category": "user_avatar"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Build the dashboard exclusively in Dark Mode to align with the Performance Pro archetype.",
+    "Implement role-based routing (Admin vs Technician) immediately after login.",
+    "For the 'Ricevute' PDF export, ensure it structurally mimics the 'Wolf's Mind ASD' receipt logic (unique numbering, tech distinct). Use a library like jspdf or react-pdf.",
+    "Use Shadcn UI components heavily but customize them to remove the 'default Vercel' look: use sharp corners, deep dark backgrounds, and subtle 1px white/10 borders.",
+    "Include data-testid attributes on EVERY interactive element (buttons, form inputs, table rows) to facilitate automated testing.",
+    "Ensure 'Scadenze' (deadlines for membership and medical visits) are prominently displayed using the accent_alert (#FF3B30) color.",
+    "Use Recharts or Shadcn Charts for the 'Report Bilancio' and Dashboard KPIs."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not use generic centered layouts or simplistic gradients.",
+    "Create depth through layered design elements with z-index hierarchy and surface elevation, not heavy shadows.",
+    "You MUST NOT apply universal transition (transition: all). Use targeted transitions.",
+    "You MUST NOT center align the app container in global CSS.",
+    "Use modern button styles (sharp or slightly rounded with interaction animations).",
+    "Never use AI assistant emoji characters (🤖🧠💡) for icons. Use the specified Phosphor Icons library.",
+    "Use sonner for toast notifications (located in /app/src/components/ui/sonner.tsx).",
+    "Use real Italian text for UI labels as requested in the problem statement."
+  ]
+}

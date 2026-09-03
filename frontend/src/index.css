@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Chivo:wght@600;700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  --wm-bg: #050505;
+  --wm-surface: #0F0F13;
+  --wm-surface-hover: #1A1A24;
+  --wm-primary: #007AFF;
+  --wm-primary-hover: #005BB5;
+  --wm-alert: #FF3B30;
+  --wm-success: #34C759;
+  --wm-warning: #FFCC00;
+  --wm-text: #FFFFFF;
+  --wm-text-muted: #A1A1AA;
+  --wm-border: rgba(255, 255, 255, 0.1);
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 2%;
+    --foreground: 0 0% 100%;
+    --card: 240 10% 6%;
+    --card-foreground: 0 0% 100%;
+    --popover: 240 10% 6%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 211 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 6% 12%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 240 6% 12%;
+    --muted-foreground: 240 5% 65%;
+    --accent: 240 6% 12%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 4 100% 59%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 6% 16%;
+    --input: 240 6% 12%;
+    --ring: 211 100% 50%;
+    --radius: 0.375rem;
+  }
+}
+
+* { border-color: hsl(var(--border)); }
+
+html, body, #root {
+  background: var(--wm-bg);
+  color: var(--wm-text);
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+h1, h2, h3, h4, .font-display {
+  font-family: 'Chivo', ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.wm-card {
+  background: var(--wm-surface);
+  border: 1px solid var(--wm-border);
+  border-radius: 6px;
+}
+
+.wm-card:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.wm-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--wm-text-muted);
+}
+
+.wm-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  color: var(--wm-text-muted);
+  border-radius: 4px;
+  transition-property: color, background-color;
+  transition-duration: 200ms;
+  font-weight: 500;
+}
+
+.wm-sidebar-link:hover {
+  color: var(--wm-text);
+  background: var(--wm-surface-hover);
+}
+
+.wm-sidebar-link.active {
+  color: var(--wm-text);
+  background: var(--wm-surface);
+  border-left: 2px solid var(--wm-primary);
+}
+
+/* Table row hover */
+tbody tr {
+  transition-property: background-color;
+  transition-duration: 150ms;
+}
+tbody tr:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--wm-bg); }
+::-webkit-scrollbar-thumb { background: #27272A; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #3F3F46; }
+
+.no-print { }
+@media print { .no-print { display: none !important; } }

@@ -1,0 +1,38 @@
+{
+  "summary": "Backend-only testing of Wolf's Mind ASD gestionale. Created pytest suite (/app/backend/tests/backend_test.py, 30 tests) against the public preview URL covering auth (cookies/JWT/bearer/logout), users+roles, tesserati CRUD, tipi-pacchetto (seed + CRUD), abbonamenti/lezioni residue, ricevute (shared numbering across admin+tecnico, auto-movimento, PDF, PATCH correction syncing movimento, DELETE->annullata, per-role visibility), Resend email with PDF attachment (delivered@resend.dev), WhatsApp link, movimenti CRUD + tecnico filtering, compensi math, dashboard, bilancio JSON+PDF, organizzazione GET/PATCH. Result: 28/30 passed. All functional business flows PASS. The 2 failures are auth-hardening gaps from the playbook (no brute-force lockout, CORS wildcard with credentials).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/login", "issue": "No brute-force protection: 6+ consecutive wrong-password attempts all return 401, no 429/423 lockout and no attempt counter. Playbook requires lockout after 5 failed attempts."},
+      {"endpoint": "CORS middleware (server.py) / backend .env CORS_ORIGINS", "issue": "CORS_ORIGINS='*' combined with allow_credentials=True -> Access-Control-Allow-Origin: '*' with Allow-Credentials: true. Browsers reject credentialed (cookie) cross-origin requests in this config. Needs explicit origin list (e.g. the preview URL) or origin echo."},
+      {"endpoint": "POST /api/ricevute", "issue": "Receipt number counter is incremented BEFORE tesserato existence check, so a failed (404) create permanently burns a receipt number, leaving gaps in the fiscal numbering. Move _next_receipt_number after validation."},
+      {"endpoint": "DELETE/PATCH /api/ricevute/{id}, /api/movimenti/{id}, /api/tesserati/{id}, /api/users/{id}, /api/tipi-pacchetto/{id}", "issue": "No existence check: deleting/patching a non-existent (but valid ObjectId) resource returns 200 {ok:true} instead of 404."},
+      {"endpoint": "POST /api/auth/register", "issue": "Documented in /app/memory/test_credentials.md but NOT implemented in server.py. Either implement or remove from the credentials doc."},
+      {"endpoint": "PATCH /api/tesserati, POST /api/tesserati", "issue": "Any tecnico can create/edit any tesserato (no ownership scoping). Only DELETE is admin-restricted - confirm this is intended."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Add login brute-force lockout (track failed attempts per email/IP, return 429/423 after 5 fails with cooldown)",
+    "Replace CORS_ORIGINS='*' with explicit origins since allow_credentials=True (cookie auth)",
+    "Generate ricevuta numero only after tesserato validation to avoid numbering gaps",
+    "Return 404 on delete/patch of non-existent documents (matched_count/deleted_count checks)",
+    "Implement or remove POST /api/auth/register (documented but missing)"
+  ],
+  "critical_code_review_comments": [
+    "server.py is 735 lines - consider splitting routers (auth/users, tesserati/abbonamenti, ricevute, contabilita/report) into modules.",
+    "@app.on_event('startup')/'shutdown' are deprecated in current FastAPI - migrate to lifespan context manager.",
+    "seed_admin logic is idempotent and correctly re-hashes when ADMIN_PASSWORD changes (verified: stored hash starts with $2b$). Good.",
+    "serialize() correctly strips _id and password_hash - verified no _id or password_hash leaks in any tested response.",
+    "Date filtering relies on lexicographic comparison of ISO strings; mixing 'YYYY-MM-DD' (ricevuta.data) with full ISO timestamps works but is fragile - consider storing normalized ISO datetimes."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "93% (28/30)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Ephemeral, all prefixed TEST_ and deleted in fixture teardown: tecnico user TEST_tec_<hex>@example.com (50%), tesserato TEST_Rossi Mario, temporary abbonamenti/lezioni/ricevute/movimenti/tipo pacchetto. Organizzazione doc was PATCHed back to its seeded values plus a 1px logo_base64 placeholder (main agent may want to clear logo_base64).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "admin@wolfsmind.it / Admin2026! (works). Tecnico users are created on the fly by the test suite.",
+  "context_for_next_testing_agent": "Run: cd /app/backend && python -m pytest tests/backend_test.py -q (pytest.ini forces -n 2 --dist loadscope; do not edit). Only TestAuth::test_brute_force_lockout and TestCors::test_cors_credentials_explicit_origin fail - both are hardening gaps, not functional bugs. Ricevuta numbering assertions are relative (n, n+1, n+2) so they are re-runnable. Email test hits the real Resend integration with delivered@resend.dev and returned a valid email_id. Frontend has NOT been tested at all yet.",
+  "rca_of_the_issue": "Lockout: server.py login() has no failed-attempt tracking collection/limit. CORS: backend/.env sets CORS_ORIGINS='*' and server.py passes it straight into CORSMiddleware alongside allow_credentials=True, which Starlette forwards as literal '*'; the browser CORS spec forbids wildcard + credentials. Currently masked because the frontend is served from the same origin as the API through the ingress."
+}
