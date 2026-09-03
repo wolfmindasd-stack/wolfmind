@@ -58,6 +58,11 @@ h1, h2, h3, h4, .font-display {
   letter-spacing: -0.02em;
 }
 
+/* Responsive H1 default: smaller on mobile */
+@media (max-width: 640px) {
+  h1.font-display { font-size: 1.75rem !important; letter-spacing: -0.03em; }
+}
+
 .wm-card {
   background: var(--wm-surface);
   border: 1px solid var(--wm-border);
@@ -66,6 +71,16 @@ h1, h2, h3, h4, .font-display {
 
 .wm-card:hover {
   border-color: rgba(255, 255, 255, 0.18);
+}
+
+/* On tables, allow horizontal scroll on mobile without breaking layout */
+.wm-card > table,
+.wm-card > .table-wrapper > table {
+  min-width: 640px;
+}
+
+.wm-card:has(> table) {
+  overflow-x: auto;
 }
 
 .wm-label {

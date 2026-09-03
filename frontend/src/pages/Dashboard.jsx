@@ -29,7 +29,7 @@ export default function Dashboard() {
     <div className="space-y-8" data-testid="dashboard-page">
       <div>
         <div className="wm-label">Dashboard {isTecnico && "· Tecnico"}</div>
-        <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Panoramica</h1>
+        <h1 className="font-display text-3xl sm:text-4xl font-black tracking-tighter mt-2">Panoramica</h1>
         <p className="text-white/50 mt-2 text-sm">
           {isTecnico ? "I tuoi dati: tesserati, ricevute, movimenti e compenso maturato." :
                        "Le metriche chiave del gestionale in tempo reale."}
@@ -55,7 +55,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="wm-card p-6 lg:col-span-1">
           <div className="wm-label mb-4">{isTecnico ? "Il tuo saldo movimenti" : "Saldo anno"}</div>
-          <div className={`font-display text-5xl font-black tracking-tighter
+          <div className={`font-display text-4xl sm:text-5xl font-black tracking-tighter
               ${d.saldo_anno >= 0 ? "text-[#34C759]" : "text-[#FF3B30]"}`}
               data-testid="kpi-saldo">{fmtEur(d.saldo_anno)}</div>
           <div className="mt-4 text-sm text-white/50">

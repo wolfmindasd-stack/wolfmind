@@ -26,7 +26,7 @@ export default function Report() {
     <div className="space-y-6" data-testid="report-page">
       <div>
         <div className="wm-label">Bilancio</div>
-        <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Report Bilancio</h1>
+        <h1 className="font-display text-3xl sm:text-4xl font-black tracking-tighter mt-2">Report Bilancio</h1>
         <p className="text-white/50 mt-2 text-sm">Visualizza entrate, uscite e saldo per un periodo, ed esporta in PDF.</p>
       </div>
 

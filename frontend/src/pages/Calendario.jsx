@@ -113,20 +113,20 @@ export default function Calendario() {
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
           <div className="wm-label">Pianificazione</div>
-          <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Calendario Lezioni</h1>
+          <h1 className="font-display text-3xl sm:text-4xl font-black tracking-tighter mt-2">Calendario Lezioni</h1>
           <p className="text-white/50 mt-2 text-sm">
             {isAdmin ? "Crea slot con ricorrenza settimanale e prenota partecipanti." :
                        "Crea le tue lezioni. Ricorrenza settimanale disponibile."}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Button variant="outline" onClick={() => setWeekStart(addDays(weekStart, -7))}
-            className="border-white/20" data-testid="prev-week">← Sett. prec.</Button>
-          <div className="wm-label text-xs px-2">
+            className="border-white/20 h-9 px-3" data-testid="prev-week">←</Button>
+          <div className="wm-label text-xs px-2 hidden sm:block">
             {weekStart.toLocaleDateString("it-IT")} → {addDays(weekStart, 27).toLocaleDateString("it-IT")}
           </div>
           <Button variant="outline" onClick={() => setWeekStart(addDays(weekStart, 7))}
-            className="border-white/20" data-testid="next-week">Prossime →</Button>
+            className="border-white/20 h-9 px-3" data-testid="next-week">→</Button>
           <Button onClick={() => openNewSlot()} className="bg-[#007AFF] hover:bg-[#005BB5]"
             data-testid="add-slot-btn">
             <Plus size={16} className="mr-1" /> Nuovo slot
@@ -134,7 +134,7 @@ export default function Calendario() {
         </div>
       </div>
 
-      <div className="grid grid-cols-7 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
         {days.map((d) => {
           const iso = fmtIso(d);
           const daySlots = slotsByDay[iso] || [];

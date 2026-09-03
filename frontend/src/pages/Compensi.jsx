@@ -66,7 +66,7 @@ export default function Compensi() {
     <div className="space-y-6" data-testid="compensi-page">
       <div>
         <div className="wm-label">Analisi</div>
-        <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Compensi tecnici</h1>
+        <h1 className="font-display text-3xl sm:text-4xl font-black tracking-tighter mt-2">Compensi tecnici</h1>
         <p className="text-white/50 mt-2 text-sm">
           Percentuale sul flusso cassa. Eroga il compenso in un click → viene creata un'uscita nel libro contabile.
         </p>

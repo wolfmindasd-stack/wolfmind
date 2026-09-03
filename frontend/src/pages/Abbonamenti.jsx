@@ -130,7 +130,7 @@ export default function Abbonamenti() {
       <div className="flex items-end justify-between">
         <div>
           <div className="wm-label">Pacchetti</div>
-          <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Abbonamenti</h1>
+          <h1 className="font-display text-3xl sm:text-4xl font-black tracking-tighter mt-2">Abbonamenti</h1>
           <p className="text-white/50 mt-2 text-sm">Lezioni acquistate, effettuate e residue. Le lezioni possono avere più partecipanti.</p>
         </div>
         <div className="flex gap-2">

@@ -88,7 +88,7 @@ export default function Verbali() {
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
           <div className="wm-label">Registro</div>
-          <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Verbali & Assemblee</h1>
+          <h1 className="font-display text-3xl sm:text-4xl font-black tracking-tighter mt-2">Verbali & Assemblee</h1>
           <p className="text-white/50 mt-2 text-sm">Archivio dei verbali di assemblea e consiglio direttivo con esportazione PDF.</p>
         </div>
         {isAdmin && (

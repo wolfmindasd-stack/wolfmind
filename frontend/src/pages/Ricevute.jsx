@@ -169,7 +169,7 @@ export default function Ricevute() {
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <div className="wm-label">Gestione</div>
-          <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Ricevute</h1>
+          <h1 className="font-display text-3xl sm:text-4xl font-black tracking-tighter mt-2">Ricevute</h1>
           <p className="text-white/50 mt-2 text-sm">
             Numerazione unica condivisa. {isAdmin && "Come admin puoi attribuire la ricevuta a un tecnico specifico."}
           </p>
@@ -201,7 +201,8 @@ export default function Ricevute() {
                 <td className="p-3">{r.tesserato_nome}</td>
                 <td className="p-3 text-white/70">{r.emesso_per_nome || r.emesso_da_nome}</td>
                 <td className="p-3 text-right font-semibold">{fmtEur(r.totale)}</td>
-                <td className="p-3 text-right whitespace-nowrap space-x-1">
+                <td className="p-3 text-right whitespace-nowrap">
+                  <div className="inline-flex flex-wrap gap-1 justify-end">
                   <Button variant="outline" size="sm" onClick={() => viewPdf(r)}
                     data-testid={`view-pdf-${r.id}`} className="border-white/20 h-8">
                     <Eye size={13} className="mr-1" /> PDF
@@ -236,6 +237,7 @@ export default function Ricevute() {
                       </Button>
                     </>
                   )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -302,8 +304,8 @@ export default function Ricevute() {
               <Label className="wm-label text-xs">Voci</Label>
               {form.items.map((it, i) => (
                 <div key={i} className="space-y-2 p-3 bg-black/30 rounded">
-                  <div className="grid grid-cols-12 gap-2 items-end">
-                    <div className="col-span-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-12 gap-2 items-end">
+                    <div className="col-span-2 sm:col-span-3">
                       <Select value={it.tipo_pacchetto_id || ""} onValueChange={(v) => applyTipo(i, v)}>
                         <SelectTrigger className="bg-black/40 border-white/10 h-9 text-xs"
                           data-testid={`select-tipo-${i}`}>
@@ -316,19 +318,19 @@ export default function Ricevute() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <Input className="col-span-3 bg-black/40 border-white/10 h-9"
+                    <Input className="col-span-2 sm:col-span-3 bg-black/40 border-white/10 h-9"
                       placeholder="Descrizione" value={it.descrizione}
                       onChange={(e) => updateItem(i, { descrizione: e.target.value })}
                       data-testid={`item-descrizione-${i}`} />
-                    <Input className="col-span-2 bg-black/40 border-white/10 h-9"
+                    <Input className="col-span-1 sm:col-span-2 bg-black/40 border-white/10 h-9"
                       type="number" placeholder="Lez." value={it.num_lezioni}
                       onChange={(e) => updateItem(i, { num_lezioni: e.target.value })}
                       data-testid={`item-lezioni-${i}`} />
-                    <Input className="col-span-3 bg-black/40 border-white/10 h-9 text-right font-semibold"
+                    <Input className="col-span-1 sm:col-span-3 bg-black/40 border-white/10 h-9 text-right font-semibold"
                       type="number" step="0.01" placeholder="Importo €" value={it.importo}
                       onChange={(e) => updateItem(i, { importo: e.target.value })}
                       data-testid={`item-importo-${i}`} />
-                    <Button variant="ghost" size="sm" className="col-span-1 text-[#FF3B30]"
+                    <Button variant="ghost" size="sm" className="col-span-2 sm:col-span-1 text-[#FF3B30] justify-self-end"
                       onClick={() => removeItem(i)} disabled={form.items.length === 1}>
                       <Trash2 size={14} />
                     </Button>

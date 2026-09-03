@@ -34,7 +34,7 @@ export default function Login() {
       <div className="w-full max-w-md">
         <div className="mb-8 text-left">
           <div className="wm-label mb-2">A.S.D. Gestionale</div>
-          <h1 className="font-display text-5xl font-black tracking-tighter leading-none">
+          <h1 className="font-display text-4xl sm:text-5xl font-black tracking-tighter leading-none">
             WOLF'S<br /><span className="text-[#007AFF]">MIND</span>
           </h1>
           <p className="mt-4 text-white/60 text-sm">

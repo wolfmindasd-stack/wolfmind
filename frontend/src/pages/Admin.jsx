@@ -15,13 +15,13 @@ export default function Admin() {
     <div className="space-y-6" data-testid="admin-page">
       <div>
         <div className="wm-label">Amministrazione</div>
-        <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Pannello Admin</h1>
+        <h1 className="font-display text-3xl sm:text-4xl font-black tracking-tighter mt-2">Pannello Admin</h1>
 
 
 
       </div>
       <Tabs defaultValue="utenti">
-        <TabsList className="bg-[#0F0F13] border border-white/10">
+        <TabsList className="bg-[#0F0F13] border border-white/10 flex-wrap h-auto justify-start">
           <TabsTrigger value="utenti" data-testid="tab-utenti">Utenti & Tecnici</TabsTrigger>
           <TabsTrigger value="pacchetti" data-testid="tab-pacchetti">Pacchetti / Listino</TabsTrigger>
           <TabsTrigger value="numerazione" data-testid="tab-numerazione">Numerazione ricevute</TabsTrigger>

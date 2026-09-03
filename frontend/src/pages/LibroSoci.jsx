@@ -51,7 +51,7 @@ export default function LibroSoci() {
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
           <div className="wm-label">Amministrazione</div>
-          <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Libro Soci</h1>
+          <h1 className="font-display text-3xl sm:text-4xl font-black tracking-tighter mt-2">Libro Soci</h1>
           <p className="text-white/50 mt-2 text-sm">Elenco ufficiale dei soci con stato tesseramento e quota associativa annuale.</p>
         </div>
         <div className="flex items-center gap-2">

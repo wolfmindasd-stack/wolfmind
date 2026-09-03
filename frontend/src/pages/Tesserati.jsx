@@ -61,7 +61,7 @@ export default function Tesserati() {
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <div className="wm-label">Anagrafica</div>
-          <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Tesserati</h1>
+          <h1 className="font-display text-3xl sm:text-4xl font-black tracking-tighter mt-2">Tesserati</h1>
           <p className="text-white/50 mt-2 text-sm">Dati anagrafici, numero tessera, tesseramenti e scadenze visite mediche.</p>
         </div>
         <Button onClick={openNew} data-testid="add-tesserato-btn" className="bg-[#007AFF] hover:bg-[#005BB5]">

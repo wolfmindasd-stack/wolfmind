@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 10 - BACKEND-ONLY regression after a pure frontend responsive redesign (Layout.jsx mobile drawer, index.css table utilities, pages/*.jsx sizing). Cleared db.login_attempts first. Ran existing suites serially: (1) tests/iter9_test.py + tests/iter7_test.py + tests/iter8_test.py -> 80/80 PASS. This covers the explicitly requested health scope: GET /api/auth/me without cookie -> 401; POST /api/auth/login admin@wolfsmind.it/Admin2026! -> 200 with httpOnly access_token/refresh_token cookies and password_hash/_id stripped; wrong password -> 401; brute-force lockout 5x401 then 429; and 200 + no raw mongo _id for /api/tesserati, /api/ricevute, /api/dashboard, /api/calendario, /api/verbali, /api/libro-soci, /api/compensi, /api/compensi/erogati, /api/abbonamenti, /api/tipi-pacchetto, /api/lezioni, /api/movimenti, /api/movimenti/riepilogo-mensile, /api/report/bilancio, /api/organizzazione, /api/users, counters CRUD + authz, portale token flows and PDF smoke (%PDF). (2) tests/backend_test.py + tests/edge_test.py -> 101 passed / 3 failed - EXACTLY the same 3 known failures as iteration 9, none new: 2 environmental email-proxy failures (backend.err.log confirms 'Email failed: 429 rate_limited' and 'Email failed: 422 undeliverable_recipient' from Resend, app maps to 502) and 1 pre-existing backlog authz gap (tecnico can PATCH its own slot tecnico_id -> 200 instead of 403). Conclusion: zero backend regressions from the responsive frontend work. Frontend not tested (out of scope per request).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/calendario/{id}", "issue": "PRE-EXISTING backlog (iter 5-10): a tecnico can reassign its own slot to another tecnico_id and receives 200 instead of 403."},
+      {"endpoint": "POST /api/ricevute/{id}/send-email", "issue": "Environmental only: Resend proxy returns 429 rate_limited / 422 undeliverable_recipient -> app returns 502. Causes 2 backend_test.py failures; not a code regression."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/iter9_test.py",
+    "/app/backend/tests/iter7_test.py",
+    "/app/backend/tests/iter8_test.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/edge_test.py",
+    "/app/test_reports/pytest/iter10_core.xml",
+    "/app/test_reports/pytest/iter10_full.xml"
+  ],
+  "action_items": [
+    "No backend action required - responsive frontend redesign caused zero backend regressions.",
+    "Backlog only: add authz check in PATCH /api/calendario/{sid} so a tecnico cannot reassign tecnico_id to another user."
+  ],
+  "critical_code_review_comments": [
+    "Login lockout is still keyed on email only (server.py) - allows account-lockout DoS; consider IP/backoff combination.",
+    "Email failures surface as 502 with no retry/queue; consider distinguishing 429 (retryable) from 422 (permanent) in the API response so the UI can message the user correctly."
+  ],
+  "updated_files": ["/app/test_reports/iteration_10.json"],
+  "success_rate": {"backend": "100% on requested scope (80/80 iter7+8+9); wider suites 101/104 with 2 environmental email failures + 1 known backlog authz gap", "frontend": "not tested (backend-only scope)"},
+  "seed_data_creation": "Ephemeral only, created and deleted by the existing suites (TEST_ prefixed tecnici/tesserati/slots). db.login_attempts cleared before the run.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@wolfsmind.it / Admin2026! (from /app/memory/test_credentials.md)",
+  "context_for_next_testing_agent": "Run serially: cd /app/backend && python -m pytest tests/iter9_test.py tests/iter7_test.py tests/iter8_test.py -q -n 0 (all pass), then tests/backend_test.py tests/edge_test.py (expect the same 3 known failures). Clear db.login_attempts before runs. Frontend UI has NOT been exercised by an agent since iteration 5 - the new responsive Layout drawer, portale tesserato UI, libro-soci PDF button, verbali/compensi and admin/numerazione tab all still need a Playwright pass at 390px/820px/1920px when frontend testing is authorised.",
+  "rca_of_the_issue": "N/A - no new issue. The 3 residual failures are identical to iteration 9: 2 external Resend email quota/recipient rejections (confirmed in /var/log/supervisor/backend.err.log) and 1 unfixed authorization gap in PATCH /api/calendario/{id}."
+}
