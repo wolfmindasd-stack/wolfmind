@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 8 backend-only focused verification of the GET /api/portale/{token}/calendario 500 fix (await was inside the any() generator expression) + full iteration-7 regression. RESULT: the critical bug is FIXED. Code review confirms server.py:1339 pre-loads `tid = str(t['_id'])` before the comprehension and line 1352 uses a pure sync genexp. NEW tests: /app/backend/tests/iter8_test.py (4 tests, 4/4 pass, reusing iter7 fixtures): (1) tesserato + 2 slots inside the 3-week window -> GET calendario 200 with both slots, gia_prenotato=false for both, posti_liberi=8; after POST /portale/{token}/prenota on slot1, re-GET -> 200 with gia_prenotato=true & posti_liberi=7 for slot1 and gia_prenotato=false & posti_liberi=8 for slot2. (2) Isolation: tesserato A books, A sees gia_prenotato=true, tesserato B sees false with posti_liberi=7 and no raw `prenotazioni` array leaked. (3) After DELETE /portale/{token}/prenota/{slot} the flag resets to false and posti_liberi back to 8. (4) Bad token -> 404 (no 500). REGRESSION: tests/iter7_test.py 40/40 PASS (previously 38/40 - the 2 calendario failures are now green), including COUNTERS, VERBALI CRUD+PDF, VERBALE PDF text assertions, COMPENSO busta-paga PDF + authz, PORTALE dashboard/ricevute/ricevuta PDF isolation, prenota 409/400/404 paths, CRON solleciti auth + idempotency, portale_token migration/uniqueness. Wider regression: tests/backend_test.py + tests/edge_test.py = 100 passed / 4 failed; 3 of those failures (TestPdf::test_pdf_resilient_to_corrupt_images, TestEmail::test_send_email_with_pdf, TestSendTracking::test_email_tracking_fields) are the known Emergent email-proxy 429 rate limit (confirmed in backend.err.log: 'Email failed: 429 rate_limited') and all 3 PASS when re-run in isolation => environmental/flaky, not code defects. The 4th (edge_test tecnico slot-reassign expects 403, gets 200) is the pre-existing backlog authz gap from iterations 5-7, unchanged. Auth playbook re-checked statically: bcrypt via bcrypt.hashpw (auth_utils.py:13, admin hash $2b$), login sets httpOnly+Secure+SameSite=None access_token/refresh_token cookies (auth_utils.py:52-55), CORS allow_credentials=True with explicit CORS_ORIGINS in backend/.env, brute-force lockout via db.login_attempts, seed_admin updates the existing admin password_hash (server.py:1507). Test data cleaned: 0 TEST_ tesserati/users/slots/verbali/compensi remaining.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/calendario/{id}", "issue": "PRE-EXISTING (iter 5-7, backlog): a tecnico can reassign its own slot to another tecnico_id and receives 200 instead of 403."},
+      {"endpoint": "POST /api/ricevute/{id}/send (email paths)", "issue": "Emergent email proxy returns 429 rate_limited when the full backend_test.py suite runs back-to-back; app maps it to 502. 3 tests fail in the full run, pass in isolation (~environmental, ~3/96 failure rate)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/iter8_test.py",
+    "/app/backend/tests/iter7_test.py",
+    "/app/test_reports/pytest/iter8_results.xml",
+    "/app/test_reports/pytest/iter8_calendario.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "portale_calendario now correctly resolves the tesserato id once; consider also indexing slot_calendario on `data` since the portal query scans a date range on every anonymous request.",
+    "Backlog (unchanged): add an authz check in PATCH /api/calendario/{id} so a tecnico cannot set tecnico_id to another user."
+  ],
+  "updated_files": ["/app/backend/tests/iter8_test.py", "/app/test_reports/iteration_8.json"],
+  "success_rate": {"backend": "100% (iter7 40/40 + iter8 4/4; wider suites 100/104 with 3 email-429 flakes and 1 known backlog authz gap)", "frontend": "not tested (backend-only scope)"},
+  "seed_data_creation": "Ephemeral TEST_I7 tesserati/slots created and deleted by the session fixtures; verified 0 leftovers in mongo.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@wolfsmind.it / Admin2026! (from /app/memory/test_credentials.md)",
+  "context_for_next_testing_agent": "Run serially: cd /app/backend && python -m pytest tests/iter7_test.py tests/iter8_test.py -q -n 0. iter8_test.py imports fixtures (admin, admin_creds, mk_tesserato, mk_slot) from tests.iter7_test - keep those fixture names stable. If backend_test.py email tests fail with 502, check /var/log/supervisor/backend.err.log for 'Email failed: 429' and re-run those tests alone before reporting. Only open backlog defect: edge_test.py tecnico PATCH slot reassign expects 403 gets 200. Frontend has still not been tested since iteration 5 (portale tesserato UI, libro-soci PDF button, verbali/compensi screens all need a UI pass).",
+  "rca_of_the_issue": "Iteration-7 defect: portale_calendario built `gia_prenotato` with an `await` inside a generator expression passed to any(), producing an async_generator that any() cannot consume -> TypeError -> 500 whenever the 3-week window returned slots. Fix (verified at server.py:1339/1352): the tesserato ObjectId is stringified once before the list comprehension and the genexp is fully synchronous. Reproduced-and-now-green tests: iter7_test.py::TestPortaleCalendario::test_window_and_flags and ::test_calendario_500_when_slot_has_prenotazione, plus the new iter8_test.py suite."
+}

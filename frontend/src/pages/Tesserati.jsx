@@ -86,6 +86,7 @@ export default function Tesserati() {
               <th className="p-3 wm-label">Città</th>
               <th className="p-3 wm-label">Tesseramento</th>
               <th className="p-3 wm-label">Visita medica</th>
+              <th className="p-3 wm-label">Portale</th>
               <th className="p-3 wm-label text-right">Azioni</th>
             </tr>
           </thead>
@@ -102,6 +103,19 @@ export default function Tesserati() {
                 <td className={`p-3 ${isExpiring(t.scadenza_visita_medica) ? "text-[#FF3B30] font-semibold" : "text-white/70"}`}>
                   {fmtDate(t.scadenza_visita_medica)}
                 </td>
+                <td className="p-3">
+                  {t.portale_token ? (
+                    <button data-testid={`copy-portale-${t.id}`}
+                      onClick={() => {
+                        const url = `${window.location.origin}/portale/${t.portale_token}`;
+                        navigator.clipboard.writeText(url);
+                        toast.success("Link portale copiato negli appunti");
+                      }}
+                      className="text-xs text-[#007AFF] hover:underline">
+                      Copia link
+                    </button>
+                  ) : <span className="text-white/30 text-xs">—</span>}
+                </td>
                 <td className="p-3 text-right">
                   <Button variant="ghost" size="sm" onClick={() => openEdit(t)}
                     data-testid={`edit-tesserato-${t.id}`}><Pencil size={14} /></Button>
@@ -115,7 +129,7 @@ export default function Tesserati() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={7} className="p-8 text-center text-white/40">Nessun tesserato</td></tr>
+              <tr><td colSpan={8} className="p-8 text-center text-white/40">Nessun tesserato</td></tr>
             )}
           </tbody>
         </table>

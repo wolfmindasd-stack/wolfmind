@@ -1,0 +1,9 @@
+crons:
+  - name: solleciti-scadenze
+    description: "Invio promemoria email 15 giorni prima della scadenza tesseramento o visita medica"
+    cron: "0 8 * * *"
+    timezone: "Europe/Rome"
+    endpoint: "{{BASE_URL}}/api/cron/solleciti-scadenze"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

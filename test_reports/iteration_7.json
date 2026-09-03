@@ -1,0 +1,77 @@
+{
+  "summary": "Iteration 7 backend-only testing of the big feature batch (COUNTERS, VERBALI CRUD+PDF, COMPENSO busta-paga PDF, PORTALE TESSERATO unauth token endpoints, CRON solleciti, portale_token startup migration) plus full regression. Created /app/backend/tests/iter7_test.py with 40 tests: 38 pass, 2 fail - both caused by ONE critical defect (GET /api/portale/{token}/calendario returns 500 whenever the 3-week window contains any slot). Regression: tests/backend_test.py 95/96 (single failure is the Emergent email proxy returning 429 rate-limited => app maps it to 502; environmental, was green in iteration 6 and re-confirmed 429 in backend.err.log), tests/edge_test.py 7/8 (only the known pre-existing tecnico slot-reassign 403 gap). VERIFIED PASSING: (1) COUNTERS - GET /api/counters/ricevute/2026 -> {year, seq:int}; 401 unauthenticated; PATCH {seq:50} as admin -> {year:2026, seq:50}, persisted on re-GET, next ricevuta numero == '2026/00051'; PATCH seq=-1 -> 422; PATCH as tecnico -> 403 (original seq restored afterwards). (2) VERBALI - POST/GET list/GET one/PATCH/DELETE then 404 and second DELETE 404; PATCH only touches supplied fields; list strips allegato_base64 and sets has_allegato=true while GET one returns the full base64; tecnico POST/PATCH/DELETE -> 403; unauthenticated -> 401; tipo='pippo' -> 422; malformed ObjectId -> 4xx; no mongo `_id` leaked. (3) VERBALE PDF - 200 application/pdf, Content-Disposition attachment, %PDF magic, pypdf text contains 'VERBALE DI ASSEMBLEA', the oggetto, the delibere text and all three presenti names; 404 for unknown id; 401 unauthenticated. (4) COMPENSO PDF - tecnico(percentuale=50) + ricevuta 200EUR + POST /api/compensi/eroga 100EUR with periodo; GET /api/compensi/erogati returns the row (no `_id`); GET /api/compensi/erogati/{cid}/pdf as admin -> 200 pdf containing 'EROGAZIONE COMPENSO', the tecnico name and the 100 amount; as the SAME tecnico -> 200; as ANOTHER tecnico -> 403; unauthenticated -> 401; unknown cid -> 404; a tecnico listing /compensi/erogati only sees its own rows. (5) PORTALE - tesserato create returns portale_token; GET /api/portale/{token} with NO cookie -> 200 with tesserato{nome,cognome,numero_tessera,scadenza_tesseramento,scadenza_visita_medica}, abbonamenti[] (lezioni_residue=12, lezioni_effettuate=0) and organizzazione{name,logo_base64}; no codice_fiscale / portale_token / id / created_by / president_signature_base64 leaked; GET /api/portale/wrong-token (and /ricevute, /calendario) -> 404. (6) PORTALE ricevute - only the owner's non-annullate receipts (id/numero/data/totale/metodo_pagamento), cross-tesserato receipt absent, a deleted/annullata receipt disappears from the list. (7) PORTALE ricevuta PDF - unauth 200 application/pdf containing 'RICEVUTA'; another tesserato's receipt -> 403 (isolation confirmed); unknown rid -> 404; after DELETE -> 404. (8) PORTALE prenota (verified against mongo because the calendario GET is broken) - POST -> 200 {ok:true} and the prenotazione is persisted with the right tesserato_id; duplicate -> 409; capacity-1 slot booked by a second tesserato -> 409; slot at +30d -> 400 (3-week rule); DELETE -> 200 and prenotazione pulled; DELETE again -> 404; wrong token -> 404; unknown slot_id -> 404. (9) CRON - no Authorization header -> 401, 'Bearer wrong-secret' -> 401, raw secret without the Bearer scheme -> 401, 'Bearer <WEBHOOK_CRON_SECRET>' -> 200 {ok:true,queued:true}; functional: a tesserato with scadenza_tesseramento=today+15 produces a db.solleciti_inviati row whose _id contains the tesserato_id with tipo='Tesseramento' and the right scadenza; a second cron run creates NO duplicate (idempotency holds). (10) MIGRATION - 0 tesserati without portale_token, 0 null tokens, all tokens unique. (11) Auth playbook re-checked: admin password_hash starts with $2b$12$, login sets HttpOnly+Secure+SameSite=None access_token and refresh_token cookies, access-control-allow-credentials:true with explicit CORS_ORIGINS in backend/.env, brute-force lockout + logout + bearer tests green in backend_test.py. Test data fully cleaned (verified via mongo: no TEST_ tesserati/users/slots/movimenti/verbali/compensi left; only pre-existing real data remains).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/portale/{token}/calendario",
+        "issue": "ALWAYS returns 500 when the 3-week window contains at least one slot. server.py:1351 does `any(p.get('tesserato_id') == str(await _tid_from_token(token)) for p in ...)` INSIDE a list comprehension - the `await` turns the inner genexp into an async_generator, so `any()` raises `TypeError: 'async_generator' object is not iterable` (traceback in /var/log/supervisor/backend.err.log). The whole Portale Tesserato calendar/booking UI is unusable. NOTE: the DB already contains 4 real 'Camminata Metabolica' slots dated 2026-09-04..09-25, i.e. inside the window, so this is broken for real users right now. FIX: resolve the id once before the comprehension -> `t = await _load_tesserato_by_token(token); tid = str(t['_id'])` and use `any(p.get('tesserato_id') == tid for p in s.get('prenotazioni', []))`. This also removes an N+1 DB lookup per slot/prenotazione.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/portale/{token}/prenota, DELETE /api/portale/{token}/prenota/{slot_id}, POST /api/cron/solleciti-scadenze",
+        "issue": "Each booking/cancel fans out a notification email to the tesserato + the slot tecnico + EVERY admin, and the cron does the same per expiring tesserato. This exhausted the Emergent email proxy rate limit during the run (429 'email rate limit exceeded' repeatedly in backend.err.log) and made backend_test.py::TestSendTracking::test_email_tracking_fields fail with 502 for >5 minutes. Consider one digest email to admins, throttling, or a retry/queue."
+      },
+      {
+        "endpoint": "GET /api/verbali, GET /api/verbali/{id}, GET /api/verbali/{id}/pdf",
+        "issue": "Read access is granted to ANY authenticated user (no require_admin) while create/update/delete are admin-only. A tecnico can read and download every assembly/board minute. Confirm this is intended."
+      },
+      {
+        "endpoint": "GET /api/portale/{token} and /api/portale/{token}/ricevute",
+        "issue": "The dashboard returns the tesserato email and the receipts list returns each receipt's `public_token` (which unlocks /api/public/ricevuta/{token}/pdf). Combined with an unauthenticated, non-expiring, non-rotatable portale_token in the URL and no rate limiting on /api/portale/*, a leaked/guessed token permanently exposes personal data. Consider rate limiting + token rotation."
+      },
+      {
+        "endpoint": "POST /api/portale/{token}/prenota",
+        "issue": "Only the upper bound (+3 weeks) is validated; a slot with a past date/hour can still be booked (the +3-week check passes). Add a lower bound (slot datetime must be in the future)."
+      },
+      {
+        "endpoint": "POST /api/compensi/eroga",
+        "issue": "No delete/reversal endpoint for db.compensi_erogati, while the movimento it creates CAN be deleted via DELETE /api/movimenti/{id} - an erroneous erogazione is unfixable and can leave an erogazione row with a dangling movimento_id."
+      },
+      {
+        "endpoint": "PATCH /api/calendario/{slot_id}",
+        "issue": "PRE-EXISTING (iterations 5 & 6, unchanged): a tecnico can reassign its own slot to another tecnico_id and gets 200 instead of 403 (edge_test.py::TestCalendarioEdges::test_tecnico_can_reassign_own_slot_to_other)."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/iter7_test.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/edge_test.py",
+    "/app/test_reports/pytest/iter7_results.xml"
+  ],
+  "action_items": [
+    "CRITICAL: fix the async_generator TypeError in portale_calendario (server.py:1351) - resolve the tesserato id once before the list comprehension; the portal calendar is 100% broken.",
+    "Re-run tests/iter7_test.py::TestPortaleCalendario after the fix (test_window_and_flags and test_calendario_500_when_slot_has_prenotazione also assert the 3-week window filter, posti_liberi and gia_prenotato=true, none of which could be verified yet).",
+    "Reduce the email fan-out on prenota/cancel/cron so the Emergent email proxy rate limit is not exhausted (it currently breaks the unrelated send-email test).",
+    "Decide whether verbali read access should be admin-only.",
+    "Reject past-dated slots in POST /api/portale/{token}/prenota.",
+    "Optional: add a reversal endpoint for compensi_erogati; fix the pre-existing tecnico slot-reassign 403 gap."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1351 - never `await` inside a comprehension's inner generator expression; Python promotes the whole comprehension to an async generator. Beyond the crash, _tid_from_token() would have hit mongo once per prenotazione per slot.",
+    "server.py is now 1538 lines (>700 guideline). Split into routers: auth, tesserati, ricevute, calendario, verbali, portale, cron, report.",
+    "server.py:1476 - `import hmac` is done inside the cron handler; move it to the module-level imports.",
+    "The portale endpoints re-run `_load_tesserato_by_token` several times per request (dashboard, calendario, prenota); pass the loaded doc around instead.",
+    "GET /api/portale/{token}/calendario ignores capacity/tecnico filtering and returns every slot in the window with `capacita`; make sure the raw `prenotazioni` array (with other members' names) is never added to this public payload - today it is correctly stripped."
+  ],
+  "updated_files": [
+    "/app/backend/tests/iter7_test.py"
+  ],
+  "success_rate": {
+    "backend": "iter7_test.py 38/40 (95%) - both failures are the single critical portale calendario 500; backend_test.py 95/96 (email proxy 429, environmental); edge_test.py 7/8 (known pre-existing defect)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "Ephemeral only: TEST_I7 tesserati, TEST_I7Tec_* tecnico users, TEST_I7 slots, verbali, ricevute, one abbonamento and one compenso erogato + its movimento. All removed (verified via mongo). db.solleciti_inviati rows for the test tesserato deleted; counter ricevute_2026 restored to its original seq (60); db.login_attempts cleared before and after the run.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "admin@wolfsmind.it / Admin2026! (from /app/memory/test_credentials.md) - valid, login OK",
+  "context_for_next_testing_agent": "Run serially: cd /app/backend && python -m pytest tests/iter7_test.py tests/backend_test.py tests/edge_test.py -q -n 0. iter7_test.py is self-contained (own fixtures, no conftest). After the portale_calendario fix, the two failing tests in TestPortaleCalendario should go green and TestPortaleCalendario::test_prenota_flow can be simplified back to asserting via the calendario endpoint instead of mongo. Careful: the portale prenota/cancel and cron endpoints send emails through the Emergent proxy, which rate-limits (429) after ~10-15 sends and then makes backend_test.py::TestSendTracking::test_email_tracking_fields fail with 502 - space out runs or run the email test first. Frontend was NOT tested at all this iteration (verbali UI, portale tesserato pages, counter editor, busta paga download button, and the ricevute col-span fix all still need a UI pass).",
+  "rca_of_the_issue": "GET /api/portale/{token}/calendario 500: server.py:1344-1353 builds the response with a list comprehension over the slots; inside it, the `gia_prenotato` key calls `any(p.get('tesserato_id') == str(await _tid_from_token(token)) for p in s.get('prenotazioni', []))`. Because the inner generator expression contains an `await`, CPython compiles it as an asynchronous generator, and the built-in `any()` (which only accepts sync iterables) raises `TypeError: 'async_generator' object is not iterable`. FastAPI converts the unhandled TypeError into a 500. It fires for every slot in the window, so the endpoint fails whenever at least one slot exists between today and today+3 weeks (which is the case in the current DB). Reproduce: create a slot at today+5 (POST /api/calendario) then GET /api/portale/{portale_token}/calendario -> 500. Mitigation: hoist the token->id resolution out of the comprehension (single await before the loop) and compare against the plain string."
+}

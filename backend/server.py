@@ -22,11 +22,13 @@ from models import (UserCreate, UserLogin, UserUpdate, TesseratoCreate, Tesserat
                      TipoPacchettoCreate, TipoPacchettoUpdate, AbbonamentoCreate,
                      LezioneCreate, RicevutaCreate, RicevutaUpdate, MovimentoCreate,
                      MovimentoUpdate, OrganizzazioneUpdate, SendReceiptEmail,
-                     SlotCreate, SlotUpdate, PrenotazioneCreate, ErogaCompenso, now_iso)
+                     SlotCreate, SlotUpdate, PrenotazioneCreate, ErogaCompenso,
+                     VerbaleCreate, VerbaleUpdate, SetCounter, PortalePrenota, now_iso)
 from auth_utils import (hash_password, verify_password, create_access_token,
                          create_refresh_token, set_auth_cookies, clear_auth_cookies,
                          get_current_user_from_db, require_admin)
-from pdf_utils import generate_receipt_pdf, generate_balance_report_pdf, generate_libro_soci_pdf
+from pdf_utils import (generate_receipt_pdf, generate_balance_report_pdf,
+                        generate_libro_soci_pdf, generate_verbale_pdf, generate_compenso_pdf)
 from email_utils import send_email_with_attachment
 from excel_utils import generate_backup_xlsx
 
@@ -179,6 +181,7 @@ async def create_tesserato(payload: TesseratoCreate, user=Depends(current_user))
     doc = payload.model_dump()
     doc["created_at"] = now_iso()
     doc["created_by"] = user["id"]
+    doc["portale_token"] = secrets.token_urlsafe(24)
     res = await db.tesserati.insert_one(doc)
     doc["_id"] = res.inserted_id
     return serialize(doc)
@@ -1170,6 +1173,317 @@ async def update_org(payload: OrganizzazioneUpdate, user=Depends(current_user)):
 
 
 # ============================================================
+
+# ============================================================
+# COUNTERS (numerazione ricevute modificabile)
+# ============================================================
+@api.get("/counters/ricevute/{year}")
+async def get_counter(year: int, user=Depends(current_user)):
+    doc = await db.counters.find_one({"_id": f"ricevute_{year}"})
+    return {"year": year, "seq": (doc or {}).get("seq", 0)}
+
+
+@api.patch("/counters/ricevute/{year}")
+async def set_counter(year: int, payload: SetCounter, user=Depends(current_user)):
+    require_admin(user)
+    await db.counters.update_one({"_id": f"ricevute_{year}"},
+                                  {"$set": {"seq": int(payload.seq)}}, upsert=True)
+    return {"year": year, "seq": int(payload.seq)}
+
+
+# ============================================================
+# VERBALI
+# ============================================================
+@api.get("/verbali")
+async def list_verbali(user=Depends(current_user)):
+    docs = await db.verbali.find({}).sort("data", -1).to_list(1000)
+    # Do not send heavy allegato in list
+    result = []
+    for d in docs:
+        s = serialize(d)
+        if s.get("allegato_base64"):
+            s["has_allegato"] = True
+            s.pop("allegato_base64", None)
+        result.append(s)
+    return result
+
+
+@api.post("/verbali")
+async def create_verbale(payload: VerbaleCreate, user=Depends(current_user)):
+    require_admin(user)
+    doc = payload.model_dump()
+    doc["created_at"] = now_iso()
+    doc["created_by"] = user["id"]
+    res = await db.verbali.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return serialize(doc)
+
+
+@api.get("/verbali/{vid}")
+async def get_verbale(vid: str, user=Depends(current_user)):
+    doc = await db.verbali.find_one({"_id": oid(vid)})
+    if not doc: raise HTTPException(status_code=404, detail="Verbale non trovato")
+    return serialize(doc)
+
+
+@api.patch("/verbali/{vid}")
+async def update_verbale(vid: str, payload: VerbaleUpdate, user=Depends(current_user)):
+    require_admin(user)
+    upd = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    res = await db.verbali.update_one({"_id": oid(vid)}, {"$set": upd})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Verbale non trovato")
+    return serialize(await db.verbali.find_one({"_id": oid(vid)}))
+
+
+@api.delete("/verbali/{vid}")
+async def delete_verbale(vid: str, user=Depends(current_user)):
+    require_admin(user)
+    res = await db.verbali.delete_one({"_id": oid(vid)})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Verbale non trovato")
+    return {"ok": True}
+
+
+@api.get("/verbali/{vid}/pdf")
+async def verbale_pdf(vid: str, user=Depends(current_user)):
+    doc = await db.verbali.find_one({"_id": oid(vid)})
+    if not doc: raise HTTPException(status_code=404, detail="Verbale non trovato")
+    org = await _load_org()
+    pdf_bytes = generate_verbale_pdf(org, serialize(doc))
+    fname = f"Verbale_{(doc.get('data') or '')[:10]}_{doc.get('tipo','')}.pdf"
+    return RawResponse(pdf_bytes, media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+# ============================================================
+# COMPENSO EROGATO -> PDF (busta paga)
+# ============================================================
+@api.get("/compensi/erogati/{cid}/pdf")
+async def compenso_pdf(cid: str, user=Depends(current_user)):
+    doc = await db.compensi_erogati.find_one({"_id": oid(cid)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Erogazione non trovata")
+    if user["role"] != "admin" and doc.get("tecnico_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="Non autorizzato")
+    tec = await db.users.find_one({"_id": oid(doc["tecnico_id"])}, {"password_hash": 0})
+    org = await _load_org()
+    # Fetch receipts of the period for the technician (for detail)
+    dett = []
+    if doc.get("periodo_da") and doc.get("periodo_a"):
+        rics = await db.ricevute.find({
+            "emesso_per_id": doc["tecnico_id"],
+            "data": {"$gte": doc["periodo_da"], "$lte": doc["periodo_a"] + "T23:59:59"},
+            "annullata": {"$ne": True}}).sort("data", 1).to_list(1000)
+        dett = [serialize(r) for r in rics]
+    pdf_bytes = generate_compenso_pdf(org, serialize(doc), serialize(tec) if tec else {}, dett)
+    fname = f"Compenso_{(tec.get('name','tecnico').replace(' ','_') if tec else 'tecnico')}_{doc.get('data','')}.pdf"
+    return RawResponse(pdf_bytes, media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+# ============================================================
+# PORTALE TESSERATO (via token pubblico)
+# ============================================================
+async def _load_tesserato_by_token(token: str) -> dict:
+    doc = await db.tesserati.find_one({"portale_token": token})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Portale non trovato")
+    return doc
+
+
+@api.get("/portale/{token}")
+async def portale_dashboard(token: str):
+    t = await _load_tesserato_by_token(token)
+    tid = str(t["_id"])
+    org = await _load_org()
+    abbon = await db.abbonamenti.find({"tesserato_id": tid}).sort("data_acquisto", -1).to_list(200)
+    abbon_ser = []
+    for a in abbon:
+        s = serialize(a)
+        used = await db.lezioni.count_documents({"partecipanti.abbonamento_id": s["id"]})
+        s["lezioni_effettuate"] = used
+        s["lezioni_residue"] = None if s.get("num_lezioni_totali") is None else max(0, s["num_lezioni_totali"] - used)
+        abbon_ser.append(s)
+    return {
+        "tesserato": {
+            "nome": t.get("nome"), "cognome": t.get("cognome"),
+            "numero_tessera": t.get("numero_tessera"),
+            "scadenza_tesseramento": t.get("scadenza_tesseramento"),
+            "scadenza_visita_medica": t.get("scadenza_visita_medica"),
+            "email": t.get("email"),
+        },
+        "abbonamenti": abbon_ser,
+        "organizzazione": {
+            "name": org.get("name"), "logo_base64": org.get("logo_base64"),
+        },
+    }
+
+
+@api.get("/portale/{token}/ricevute")
+async def portale_ricevute(token: str):
+    t = await _load_tesserato_by_token(token)
+    rics = await db.ricevute.find({"tesserato_id": str(t["_id"]),
+                                     "annullata": {"$ne": True}}).sort("data", -1).to_list(500)
+    return [{
+        "id": str(r["_id"]), "numero": r.get("numero"),
+        "data": r.get("data"), "totale": r.get("totale"),
+        "metodo_pagamento": r.get("metodo_pagamento"),
+        "public_token": r.get("public_token"),
+    } for r in rics]
+
+
+@api.get("/portale/{token}/calendario")
+async def portale_calendario(token: str):
+    t = await _load_tesserato_by_token(token)
+    tid = str(t["_id"])
+    now = datetime.now(timezone.utc).date()
+    limit = (now + timedelta(weeks=3)).isoformat()
+    slots = await db.slot_calendario.find({
+        "data": {"$gte": now.isoformat(), "$lte": limit}
+    }).sort([("data", 1), ("ora", 1)]).to_list(500)
+    return [{
+        "id": str(s["_id"]), "data": s.get("data"), "ora": s.get("ora"),
+        "durata_min": s.get("durata_min"), "luogo": s.get("luogo"),
+        "tecnico_nome": s.get("tecnico_nome"),
+        "descrizione": s.get("descrizione"),
+        "capacita": s.get("capacita"),
+        "posti_liberi": max(0, s.get("capacita", 0) - len(s.get("prenotazioni", []))),
+        "gia_prenotato": any(p.get("tesserato_id") == tid for p in s.get("prenotazioni", [])),
+    } for s in slots]
+
+
+async def _tid_from_token(token: str) -> ObjectId:
+    t = await _load_tesserato_by_token(token)
+    return t["_id"]
+
+
+@api.post("/portale/{token}/prenota")
+async def portale_prenota(token: str, payload: PortalePrenota, background: BackgroundTasks):
+    t = await _load_tesserato_by_token(token)
+    slot = await db.slot_calendario.find_one({"_id": oid(payload.slot_id)})
+    if not slot: raise HTTPException(status_code=404, detail="Slot non trovato")
+    max_date = (datetime.now(timezone.utc) + timedelta(weeks=3)).date().isoformat()
+    if slot["data"] > max_date:
+        raise HTTPException(status_code=400, detail="Puoi prenotare fino a 3 settimane dalla data odierna")
+    tid = str(t["_id"])
+    if any(p.get("tesserato_id") == tid for p in slot.get("prenotazioni", [])):
+        raise HTTPException(status_code=409, detail="Sei già prenotato per questa lezione")
+    if len(slot.get("prenotazioni", [])) >= slot.get("capacita", 8):
+        raise HTTPException(status_code=409, detail="Slot al completo")
+    prenot = {"tesserato_id": tid,
+              "tesserato_nome": f"{t['cognome']} {t['nome']}",
+              "prenotato_da": tid, "prenotato_at": now_iso()}
+    await db.slot_calendario.update_one({"_id": oid(payload.slot_id)},
+                                         {"$push": {"prenotazioni": prenot}})
+    org = await _load_org()
+    background.add_task(_notify_prenotazione, "create", slot, t, org)
+    return {"ok": True}
+
+
+@api.delete("/portale/{token}/prenota/{slot_id}")
+async def portale_cancel(token: str, slot_id: str, background: BackgroundTasks):
+    t = await _load_tesserato_by_token(token)
+    tid = str(t["_id"])
+    slot = await db.slot_calendario.find_one({"_id": oid(slot_id)})
+    if not slot: raise HTTPException(status_code=404, detail="Slot non trovato")
+    existed = any(p.get("tesserato_id") == tid for p in slot.get("prenotazioni", []))
+    if not existed:
+        raise HTTPException(status_code=404, detail="Prenotazione non trovata")
+    await db.slot_calendario.update_one({"_id": oid(slot_id)},
+                                         {"$pull": {"prenotazioni": {"tesserato_id": tid}}})
+    org = await _load_org()
+    background.add_task(_notify_prenotazione, "delete", slot, t, org)
+    return {"ok": True}
+
+
+@api.get("/portale/{token}/ricevuta/{rid}/pdf")
+async def portale_ricevuta_pdf(token: str, rid: str):
+    t = await _load_tesserato_by_token(token)
+    doc = await db.ricevute.find_one({"_id": oid(rid)})
+    if not doc: raise HTTPException(status_code=404, detail="Ricevuta non trovata")
+    if doc.get("tesserato_id") != str(t["_id"]):
+        raise HTTPException(status_code=403, detail="Non autorizzato")
+    if doc.get("annullata"):
+        raise HTTPException(status_code=410, detail="Ricevuta annullata")
+    org = await _load_org()
+    pdf_bytes = generate_receipt_pdf(serialize(doc), serialize(t),
+                                     org, doc.get("emesso_per_nome") or doc.get("emesso_da_nome", ""))
+    filename = f"Ricevuta_{doc['numero'].replace('/', '-')}.pdf"
+    return RawResponse(pdf_bytes, media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+# ============================================================
+# CRON: SOLLECITI SCADENZE
+# ============================================================
+async def _run_solleciti_scadenze():
+    """Send reminder emails 15 days before tesseramento/visita medica expiration."""
+    now = datetime.now(timezone.utc).date()
+    target = (now + timedelta(days=15)).isoformat()
+    org = await _load_org()
+    org_name = org.get("name", "Wolf's Mind A.S.D.")
+    admins = await db.users.find({"role": "admin", "active": {"$ne": False}}).to_list(20)
+    admin_emails = [a["email"] for a in admins if a.get("email")]
+    # Idempotent: track sends in db.solleciti_inviati (key: tesserato_id+tipo+scadenza)
+    for t in await db.tesserati.find({"$or": [
+        {"scadenza_tesseramento": target},
+        {"scadenza_visita_medica": target},
+    ]}).to_list(2000):
+        for tipo, scad in [("Tesseramento", t.get("scadenza_tesseramento")),
+                             ("Visita medica", t.get("scadenza_visita_medica"))]:
+            if scad != target: continue
+            key = f"{t['_id']}:{tipo}:{scad}"
+            if await db.solleciti_inviati.find_one({"_id": key}):
+                continue
+            subj = f"Promemoria scadenza {tipo} - {org_name}"
+            html = f"""
+            <table role="presentation" width="100%" style="font-family:Arial,sans-serif;background:#f5f7fa">
+              <tr><td style="padding:32px">
+                <table role="presentation" width="100%" style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px">
+                  <tr><td style="background:#1E3A5F;color:#fff;padding:20px">
+                    <div style="font-size:18px;font-weight:700">{org_name}</div>
+                    <div style="font-size:13px;opacity:0.85">Promemoria scadenza</div>
+                  </td></tr>
+                  <tr><td style="padding:24px">
+                    <p>Gentile <strong>{t.get('nome','')} {t.get('cognome','')}</strong>,</p>
+                    <p>ti ricordiamo che la tua <strong>{tipo}</strong> è in scadenza il
+                    <strong>{scad}</strong> (fra 15 giorni).</p>
+                    <p>Ti invitiamo a provvedere per tempo al rinnovo, contattando la segreteria.</p>
+                    <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
+                    <p style="font-size:12px;color:#888">Promemoria automatico - {org_name}</p>
+                  </td></tr>
+                </table>
+              </td></tr>
+            </table>
+            """
+            recipients = set()
+            if t.get("email"): recipients.add(t["email"])
+            recipients.update(admin_emails)
+            for rec in recipients:
+                try:
+                    await send_email_with_attachment(to=rec, subject=subj, html=html)
+                except Exception as e:
+                    logger.warning(f"Sollecito failed for {rec}: {e}")
+            await db.solleciti_inviati.insert_one({
+                "_id": key, "tesserato_id": str(t["_id"]),
+                "tipo": tipo, "scadenza": scad, "sent_at": now_iso()})
+
+
+@api.post("/cron/solleciti-scadenze")
+async def cron_solleciti(request: Request, background: BackgroundTasks):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    import hmac
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing auth")
+    token = auth[7:]
+    expected = os.environ.get("WEBHOOK_CRON_SECRET", "")
+    if not expected or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid auth")
+    background.add_task(_run_solleciti_scadenze)
+    return {"ok": True, "queued": True}
+
 app.include_router(api)
 
 app.add_middleware(
@@ -1201,6 +1515,10 @@ async def startup():
     await db.tipi_pacchetto.update_many(
         {"esclude_da_compensi": {"$exists": False}},
         {"$set": {"esclude_da_compensi": False}})
+    # Backfill portale_token per tesserati legacy
+    async for t in db.tesserati.find({"portale_token": {"$exists": False}}):
+        await db.tesserati.update_one({"_id": t["_id"]},
+                                        {"$set": {"portale_token": secrets.token_urlsafe(24)}})
     if await db.tipi_pacchetto.count_documents({}) == 0:
         await db.tipi_pacchetto.insert_many([
             {"nome": "12 lezioni", "descrizione": "Pacchetto 12 lezioni",

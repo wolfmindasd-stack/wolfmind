@@ -316,16 +316,16 @@ export default function Ricevute() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <Input className="col-span-5 bg-black/40 border-white/10 h-9"
+                    <Input className="col-span-3 bg-black/40 border-white/10 h-9"
                       placeholder="Descrizione" value={it.descrizione}
                       onChange={(e) => updateItem(i, { descrizione: e.target.value })}
                       data-testid={`item-descrizione-${i}`} />
                     <Input className="col-span-2 bg-black/40 border-white/10 h-9"
-                      type="number" placeholder="N. lez." value={it.num_lezioni}
+                      type="number" placeholder="Lez." value={it.num_lezioni}
                       onChange={(e) => updateItem(i, { num_lezioni: e.target.value })}
                       data-testid={`item-lezioni-${i}`} />
-                    <Input className="col-span-1 bg-black/40 border-white/10 h-9"
-                      type="number" step="0.01" placeholder="€" value={it.importo}
+                    <Input className="col-span-3 bg-black/40 border-white/10 h-9 text-right font-semibold"
+                      type="number" step="0.01" placeholder="Importo €" value={it.importo}
                       onChange={(e) => updateItem(i, { importo: e.target.value })}
                       data-testid={`item-importo-${i}`} />
                     <Button variant="ghost" size="sm" className="col-span-1 text-[#FF3B30]"

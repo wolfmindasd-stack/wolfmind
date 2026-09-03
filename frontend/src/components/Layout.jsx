@@ -5,7 +5,7 @@ import { api, API } from "../lib/api";
 import {
   LayoutDashboard, Users, Package, Receipt, BookOpen,
   BarChart3, Wallet, Settings, LogOut, ShieldCheck,
-  BookUser, Calendar, FileSpreadsheet,
+  BookUser, Calendar, FileSpreadsheet, ScrollText,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 
@@ -18,6 +18,7 @@ const links = [
   { to: "/calendario", label: "Calendario", icon: Calendar, testid: "nav-calendario" },
   { to: "/movimenti", label: "Libro Contabile", icon: BookOpen, testid: "nav-movimenti" },
   { to: "/compensi", label: "Compensi", icon: Wallet, testid: "nav-compensi" },
+  { to: "/verbali", label: "Verbali", icon: ScrollText, testid: "nav-verbali" },
   { to: "/report", label: "Report Bilancio", icon: BarChart3, testid: "nav-report" },
 ];
 

@@ -162,10 +162,25 @@ export default function Compensi() {
                   <td className="p-3 text-white/70">{e.metodo}</td>
                   <td className="p-3 text-right font-semibold text-[#34C759]">{fmtEur(e.importo)}</td>
                   <td className="p-3 text-white/60 text-xs">{e.note}</td>
+                  <td className="p-3 text-right">
+                    <Button size="sm" variant="outline" className="border-white/20 h-8"
+                      data-testid={`bustapaga-${e.id}`}
+                      onClick={async () => {
+                        try {
+                          const res = await api.get(`/compensi/erogati/${e.id}/pdf`, { responseType: "blob" });
+                          const url = URL.createObjectURL(res.data);
+                          const a = document.createElement("a"); a.href = url;
+                          a.download = `Compenso_${e.tecnico_nome.replace(/ /g,'_')}_${e.data}.pdf`;
+                          a.click(); URL.revokeObjectURL(url);
+                        } catch { toast.error("Errore PDF"); }
+                      }}>
+                      <Download size={12} className="mr-1" /> Busta paga
+                    </Button>
+                  </td>
                 </tr>
               ))}
               {erogati.length === 0 && (
-                <tr><td colSpan={6} className="p-8 text-center text-white/40">Nessuna erogazione registrata</td></tr>
+                <tr><td colSpan={7} className="p-8 text-center text-white/40">Nessuna erogazione registrata</td></tr>
               )}
             </tbody>
           </table>

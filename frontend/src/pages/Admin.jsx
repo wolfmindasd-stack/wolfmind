@@ -16,15 +16,61 @@ export default function Admin() {
       <div>
         <div className="wm-label">Amministrazione</div>
         <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Pannello Admin</h1>
+
+function NumerazioneTab() {
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [seq, setSeq] = useState(0);
+  const [newSeq, setNewSeq] = useState(0);
+  const load = async () => {
+    const { data } = await api.get(`/counters/ricevute/${year}`);
+    setSeq(data.seq); setNewSeq(data.seq);
+  };
+  useEffect(() => { load(); }, [year]);
+  const save = async () => {
+    if (!window.confirm(`Impostare il contatore ricevute ${year} a ${newSeq}? La prossima ricevuta sarà N. ${year}/${String(Number(newSeq) + 1).padStart(5,'0')}`)) return;
+    try {
+      await api.patch(`/counters/ricevute/${year}`, { seq: Number(newSeq) });
+      toast.success("Numerazione aggiornata"); load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+  return (
+    <div className="wm-card p-6 space-y-4 max-w-xl">
+      <div className="text-sm text-white/70">
+        Imposta manualmente il progressivo delle ricevute per un anno.
+        Utile per iniziare da un numero specifico (es. da 51). Il valore rappresenta l'ultima
+        ricevuta emessa; la successiva sarà quel valore +1.
+      </div>
+      <div className="grid grid-cols-3 gap-3 items-end">
+        <div><Label className="wm-label text-xs">Anno</Label>
+          <Input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}
+            className="bg-black/40 border-white/10" data-testid="numerazione-anno" /></div>
+        <div><Label className="wm-label text-xs">Ultima ricevuta emessa</Label>
+          <Input type="number" value={newSeq} min={0}
+            onChange={(e) => setNewSeq(e.target.value)}
+            className="bg-black/40 border-white/10" data-testid="numerazione-seq" /></div>
+        <Button onClick={save} className="bg-[#007AFF] hover:bg-[#005BB5]"
+          data-testid="save-counter-btn">Applica</Button>
+      </div>
+      <div className="text-xs text-white/50">
+        Attualmente il contatore per l'anno {year} è a <b>{seq}</b>. Prossima ricevuta:
+        <b> {year}/{String(seq + 1).padStart(5, '0')}</b>.
+      </div>
+    </div>
+  );
+}
+
+
       </div>
       <Tabs defaultValue="utenti">
         <TabsList className="bg-[#0F0F13] border border-white/10">
           <TabsTrigger value="utenti" data-testid="tab-utenti">Utenti & Tecnici</TabsTrigger>
           <TabsTrigger value="pacchetti" data-testid="tab-pacchetti">Pacchetti / Listino</TabsTrigger>
+          <TabsTrigger value="numerazione" data-testid="tab-numerazione">Numerazione ricevute</TabsTrigger>
           <TabsTrigger value="org" data-testid="tab-org">Dati Organizzazione</TabsTrigger>
         </TabsList>
         <TabsContent value="utenti" className="mt-4"><UtentiTab /></TabsContent>
         <TabsContent value="pacchetti" className="mt-4"><PacchettiTab /></TabsContent>
+        <TabsContent value="numerazione" className="mt-4"><NumerazioneTab /></TabsContent>
         <TabsContent value="org" className="mt-4"><OrgTab /></TabsContent>
       </Tabs>
     </div>

@@ -222,3 +222,36 @@ class ErogaCompenso(BaseModel):
     periodo_a: Optional[str] = None
     metodo: str = "Bonifico"
     note: Optional[str] = ""
+
+
+# --- Verbali ---
+class VerbaleCreate(BaseModel):
+    tipo: Literal["assemblea", "direttivo", "altro"] = "assemblea"
+    data: str
+    oggetto: str
+    contenuto: str = ""
+    presenti: List[str] = Field(default_factory=list)
+    assenti: List[str] = Field(default_factory=list)
+    delibere: str = ""
+    allegato_base64: Optional[str] = None
+
+
+class VerbaleUpdate(BaseModel):
+    tipo: Optional[Literal["assemblea", "direttivo", "altro"]] = None
+    data: Optional[str] = None
+    oggetto: Optional[str] = None
+    contenuto: Optional[str] = None
+    presenti: Optional[List[str]] = None
+    assenti: Optional[List[str]] = None
+    delibere: Optional[str] = None
+    allegato_base64: Optional[str] = None
+
+
+# --- Numeratore Ricevute ---
+class SetCounter(BaseModel):
+    seq: int = Field(ge=0)
+
+
+# --- Portale Prenotazione (via token) ---
+class PortalePrenota(BaseModel):
+    slot_id: str

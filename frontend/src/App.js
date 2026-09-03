@@ -14,6 +14,8 @@ import Report from "./pages/Report";
 import Admin from "./pages/Admin";
 import Calendario from "./pages/Calendario";
 import LibroSoci from "./pages/LibroSoci";
+import Verbali from "./pages/Verbali";
+import Portale from "./pages/Portale";
 
 const Loader = () => (
   <div className="min-h-screen flex items-center justify-center bg-[#050505] text-white/60">
@@ -42,6 +44,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginRoute />} />
+          <Route path="/portale/:token" element={<Portale />} />
           <Route path="/" element={<Protected><Dashboard /></Protected>} />
           <Route path="/tesserati" element={<Protected><Tesserati /></Protected>} />
           <Route path="/libro-soci" element={<Protected><LibroSoci /></Protected>} />
@@ -51,6 +54,7 @@ export default function App() {
           <Route path="/movimenti" element={<Protected><Movimenti /></Protected>} />
           <Route path="/compensi" element={<Protected><Compensi /></Protected>} />
           <Route path="/report" element={<Protected><Report /></Protected>} />
+          <Route path="/verbali" element={<Protected><Verbali /></Protected>} />
           <Route path="/admin" element={<Protected adminOnly><Admin /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
