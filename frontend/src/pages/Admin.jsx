@@ -17,6 +17,25 @@ export default function Admin() {
         <div className="wm-label">Amministrazione</div>
         <h1 className="font-display text-4xl font-black tracking-tighter mt-2">Pannello Admin</h1>
 
+
+
+      </div>
+      <Tabs defaultValue="utenti">
+        <TabsList className="bg-[#0F0F13] border border-white/10">
+          <TabsTrigger value="utenti" data-testid="tab-utenti">Utenti & Tecnici</TabsTrigger>
+          <TabsTrigger value="pacchetti" data-testid="tab-pacchetti">Pacchetti / Listino</TabsTrigger>
+          <TabsTrigger value="numerazione" data-testid="tab-numerazione">Numerazione ricevute</TabsTrigger>
+          <TabsTrigger value="org" data-testid="tab-org">Dati Organizzazione</TabsTrigger>
+        </TabsList>
+        <TabsContent value="utenti" className="mt-4"><UtentiTab /></TabsContent>
+        <TabsContent value="pacchetti" className="mt-4"><PacchettiTab /></TabsContent>
+        <TabsContent value="numerazione" className="mt-4"><NumerazioneTab /></TabsContent>
+        <TabsContent value="org" className="mt-4"><OrgTab /></TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
 function NumerazioneTab() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [seq, setSeq] = useState(0);
@@ -55,24 +74,6 @@ function NumerazioneTab() {
         Attualmente il contatore per l'anno {year} è a <b>{seq}</b>. Prossima ricevuta:
         <b> {year}/{String(seq + 1).padStart(5, '0')}</b>.
       </div>
-    </div>
-  );
-}
-
-
-      </div>
-      <Tabs defaultValue="utenti">
-        <TabsList className="bg-[#0F0F13] border border-white/10">
-          <TabsTrigger value="utenti" data-testid="tab-utenti">Utenti & Tecnici</TabsTrigger>
-          <TabsTrigger value="pacchetti" data-testid="tab-pacchetti">Pacchetti / Listino</TabsTrigger>
-          <TabsTrigger value="numerazione" data-testid="tab-numerazione">Numerazione ricevute</TabsTrigger>
-          <TabsTrigger value="org" data-testid="tab-org">Dati Organizzazione</TabsTrigger>
-        </TabsList>
-        <TabsContent value="utenti" className="mt-4"><UtentiTab /></TabsContent>
-        <TabsContent value="pacchetti" className="mt-4"><PacchettiTab /></TabsContent>
-        <TabsContent value="numerazione" className="mt-4"><NumerazioneTab /></TabsContent>
-        <TabsContent value="org" className="mt-4"><OrgTab /></TabsContent>
-      </Tabs>
     </div>
   );
 }

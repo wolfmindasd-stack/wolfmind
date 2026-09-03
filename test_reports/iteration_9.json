@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 9 - BACKEND-ONLY regression after the frontend-only fix (NumerazioneTab moved out of the Admin() body in Admin.jsx). Confirmed NO backend regressions. Ran: (1) NEW /app/backend/tests/iter9_test.py -> 36/36 PASS covering the explicitly requested scope: GET /api/auth/me without cookie -> 401; POST /api/auth/login admin@wolfsmind.it/Admin2026! -> 200 with httpOnly access_token+refresh_token cookies, user payload without password_hash/_id, /auth/me 200 afterwards; wrong password -> 401; COUNTERS GET /api/counters/ricevute/2026 -> 200 {year:2026, seq:int}, unauth -> 401, PATCH as admin {seq:N} -> 200 with GET-verified persistence and restore, PATCH as freshly created tecnico -> 403 (tecnico GET still 200); smoke of all main modules as admin (200 + no mongo _id leak): /tesserati /ricevute /verbali /libro-soci /dashboard /calendario /compensi /compensi/erogati /abbonamenti /tipi-pacchetto /lezioni /movimenti /movimenti/riepilogo-mensile?year=2026 /report/bilancio?date_from&date_to /organizzazione /users, plus 401 for all of them unauthenticated; PORTALE unauth: bad token -> 404 on /portale/{t}, /ricevute, /calendario, valid token -> 200 on all three with no raw _id; PDF smoke: /libro-soci/pdf and /report/bilancio/pdf return %PDF; brute-force lockout: 5x wrong password -> 401 then 6th -> 429 'Troppi tentativi' (attempt record cleaned up after test). (2) Regression tests/iter7_test.py + tests/iter8_test.py -> 44/44 PASS. (3) Wider regression tests/backend_test.py + tests/edge_test.py -> 101 passed / 3 failed; 2 failures are the known environmental Emergent/Resend email proxy issue (backend.err.log shows 'Email failed: 429 rate_limited' and 'Email failed: 422 undeliverable_recipient' -> app maps to 502), the 3rd is the unchanged pre-existing backlog authz gap (tecnico can PATCH its own slot's tecnico_id -> 200 instead of 403). Auth playbook verified: admin password_hash starts with $2b$12$, httpOnly cookies set in set_auth_cookies, CORS_ORIGINS explicit in backend/.env with allow_credentials, lockout via db.login_attempts keyed on lowercased email with 15 min lock. DB hygiene: db.login_attempts and db.solleciti_inviati cleared before the run and 0 leftover TEST_ users/tesserati/verbali/slots/ricevute after the run.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/calendario/{id}", "issue": "PRE-EXISTING backlog (iter 5-9): a tecnico can reassign its own slot to another tecnico_id and gets 200 instead of 403."},
+      {"endpoint": "POST /api/ricevute/{id}/send-email", "issue": "Environmental (per main-agent note, ignored): email proxy returns 429 rate_limited / 422 undeliverable_recipient -> app returns 502. 2 tests in backend_test.py fail for this reason only."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/iter9_test.py",
+    "/app/test_reports/pytest/iter9_results.xml",
+    "/app/test_reports/pytest/iter9_iter78.xml",
+    "/app/test_reports/pytest/iter9_full.xml"
+  ],
+  "action_items": [
+    "No backend action required for this iteration - the Admin.jsx fix caused zero backend regressions.",
+    "Backlog only: add an authz check in PATCH /api/calendario/{sid} so a tecnico cannot set tecnico_id to another user."
+  ],
+  "critical_code_review_comments": [
+    "login lockout is keyed on email only (server.py:76) - by design behind the ingress, but it allows an attacker to lock out a legitimate account (account-lockout DoS). Consider combining with X-Forwarded-For or using an exponential backoff instead of a hard 15-min lock.",
+    "/app/frontend/src/pages/Admin.jsx is 423 lines with multiple tab components in one file; splitting NumerazioneTab/UtentiTab into separate files would have prevented this class of syntax regression."
+  ],
+  "updated_files": ["/app/backend/tests/iter9_test.py", "/app/test_reports/iteration_9.json"],
+  "success_rate": {"backend": "100% (iter9 36/36, iter7+iter8 44/44; wider suites 101/104 with 2 environmental email failures and 1 known backlog authz gap)", "frontend": "not tested (backend-only scope as requested)"},
+  "seed_data_creation": "Ephemeral: 1 TEST_i9 tecnico user (created+deleted in the counters authz test) and 1 TEST_i9_lockout login_attempts record (deleted by the test). Verified 0 leftovers.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@wolfsmind.it / Admin2026! (from /app/memory/test_credentials.md)",
+  "context_for_next_testing_agent": "Run: cd /app/backend && python -m pytest tests/iter9_test.py tests/iter7_test.py tests/iter8_test.py -q -n 0 (serial). iter9_test.py is self-contained (own creds/admin fixtures) and cleans its own data; note /report/bilancio and /report/bilancio/pdf require date_from & date_to query params and /movimenti/riepilogo-mensile requires year, otherwise 422. POST /api/users needs 'name' (not 'nome'). Frontend UI has still not been exercised by an agent since iteration 5 - portale tesserato UI, libro-soci PDF button, verbali/compensi and the new admin/numerazione tab all need a Playwright pass when frontend testing is authorised.",
+  "rca_of_the_issue": "The reported bug was purely a frontend JS/JSX syntax error (NumerazioneTab declared inside the Admin() component body). Backend code untouched; all backend suites confirm parity with iteration 8 results, so no backend RCA applies."
+}
