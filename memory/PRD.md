@@ -42,6 +42,11 @@ FastAPI + MongoDB + React 19 + Tailwind + Shadcn + reportlab (PDF) + Resend (ema
   - Busta paga PDF a 2 pagine: pag1 compenso+firme (segretario+presidente), pag2 riepilogo ricevute che hanno generato il compenso
   - Verbali arricchiti: sede, ora_inizio, ora_chiusura, data_chiusura, partecipanti_remoti[], toggle firme_abilitate
   - PWA install button con istruzioni PC dettagliate (Chrome/Edge/Brave: icona installa nell'URL o menu ⋮ → Installa app)
+- **Compensi CRUD (2026-02)**:
+  - PATCH /compensi/erogati/{cid} aggiorna anche il movimento contabile collegato
+  - DELETE /compensi/erogati/{cid} rimuove anche il movimento (annullamento)
+  - Frontend: icone matita/cestino nella tabella storico erogazioni (solo admin)
+  - Dialog "Modifica compenso erogato" riusa il form dell'erogazione con etichette dinamiche
 
 ## Roadmap / Backlog
 - P2: WhatsApp Business API (invio automatico senza wa.me manuale)

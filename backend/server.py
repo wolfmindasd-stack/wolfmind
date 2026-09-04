@@ -1293,6 +1293,57 @@ async def list_compensi_erogati(tecnico_id: Optional[str] = None, user=Depends(c
     return [serialize(d) for d in docs]
 
 
+@api.patch("/compensi/erogati/{cid}")
+async def update_compenso_erogato(cid: str, payload: ErogaCompenso,
+                                    user=Depends(current_user)):
+    require_admin(user)
+    doc = await db.compensi_erogati.find_one({"_id": oid(cid)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Compenso non trovato")
+    if payload.importo <= 0:
+        raise HTTPException(status_code=422, detail="L'importo deve essere maggiore di zero")
+    tec = await db.users.find_one({"_id": oid(payload.tecnico_id)})
+    if not tec:
+        raise HTTPException(status_code=404, detail="Tecnico non trovato")
+    desc = f"Compenso a {tec['name']}"
+    if payload.periodo_da and payload.periodo_a:
+        desc += f" (periodo {payload.periodo_da} > {payload.periodo_a})"
+    # Aggiorna il compenso erogato
+    upd_c = {"tecnico_id": payload.tecnico_id, "tecnico_nome": tec["name"],
+             "data": payload.data, "importo": float(payload.importo),
+             "periodo_da": payload.periodo_da, "periodo_a": payload.periodo_a,
+             "metodo": payload.metodo, "note": payload.note or ""}
+    await db.compensi_erogati.update_one({"_id": oid(cid)}, {"$set": upd_c})
+    # Aggiorna il movimento collegato
+    mv_id = doc.get("movimento_id")
+    if mv_id:
+        await db.movimenti.update_one(
+            {"_id": oid(mv_id)},
+            {"$set": {"data": payload.data, "categoria": "Compenso tecnico",
+                       "descrizione": desc, "importo": float(payload.importo),
+                       "tecnico_id": payload.tecnico_id,
+                       "metodo_pagamento": payload.metodo,
+                       "note": payload.note or ""}})
+    doc2 = await db.compensi_erogati.find_one({"_id": oid(cid)})
+    return serialize(doc2)
+
+
+@api.delete("/compensi/erogati/{cid}")
+async def delete_compenso_erogato(cid: str, user=Depends(current_user)):
+    require_admin(user)
+    doc = await db.compensi_erogati.find_one({"_id": oid(cid)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Compenso non trovato")
+    # Elimina anche il movimento collegato
+    if doc.get("movimento_id"):
+        try:
+            await db.movimenti.delete_one({"_id": oid(doc["movimento_id"])})
+        except Exception:
+            pass
+    await db.compensi_erogati.delete_one({"_id": oid(cid)})
+    return {"ok": True}
+
+
 # ============================================================
 # EXPORT EXCEL
 # ============================================================

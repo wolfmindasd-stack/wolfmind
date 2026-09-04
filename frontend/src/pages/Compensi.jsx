@@ -5,7 +5,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Wallet, Download, CheckCircle } from "lucide-react";
+import { Wallet, Download, CheckCircle, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../lib/auth";
 
@@ -17,6 +17,7 @@ export default function Compensi() {
   const [from, setFrom] = useState(`${new Date().getFullYear()}-01-01`);
   const [to, setTo] = useState(`${new Date().getFullYear()}-12-31`);
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({
     tecnico_id: "", data: todayIso(), importo: 0,
     periodo_da: from, periodo_a: to, metodo: "Bonifico", note: "",
@@ -32,7 +33,7 @@ export default function Compensi() {
   useEffect(() => { load(); }, []);
 
   const eroga = (c) => {
-    // Determine already paid in this range
+    setEditingId(null);
     const paidInRange = erogati
       .filter((x) => x.tecnico_id === c.tecnico_id &&
                      x.periodo_da === from && x.periodo_a === to)
@@ -45,12 +46,45 @@ export default function Compensi() {
     setOpen(true);
   };
 
+  const openEdit = (e) => {
+    setEditingId(e.id);
+    setForm({
+      tecnico_id: e.tecnico_id,
+      data: (e.data || "").slice(0, 10),
+      importo: e.importo,
+      periodo_da: e.periodo_da || from,
+      periodo_a: e.periodo_a || to,
+      metodo: e.metodo || "Bonifico",
+      note: e.note || "",
+    });
+    setOpen(true);
+  };
+
+  const removeErogato = async (e) => {
+    if (!window.confirm(
+      `Annullare il compenso di ${e.tecnico_nome} del ${fmtDate(e.data)} (${fmtEur(e.importo)})?\n` +
+      `Verrà eliminato anche il movimento contabile collegato.`
+    )) return;
+    try {
+      await api.delete(`/compensi/erogati/${e.id}`);
+      toast.success("Compenso annullato");
+      load();
+    } catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail)); }
+  };
+
   const saveEroga = async () => {
     if (!form.importo || form.importo <= 0) { toast.error("Inserisci un importo"); return; }
     try {
-      await api.post("/compensi/eroga", { ...form, importo: Number(form.importo) });
-      toast.success("Compenso erogato. Movimento uscita creato.");
-      setOpen(false); load();
+      if (editingId) {
+        await api.patch(`/compensi/erogati/${editingId}`,
+          { ...form, importo: Number(form.importo) });
+        toast.success("Compenso aggiornato");
+      } else {
+        await api.post("/compensi/eroga",
+          { ...form, importo: Number(form.importo) });
+        toast.success("Compenso erogato. Movimento uscita creato.");
+      }
+      setOpen(false); setEditingId(null); load();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
 
@@ -168,8 +202,8 @@ export default function Compensi() {
         <div className="wm-label mb-2 flex items-center gap-2">
           <CheckCircle size={12} className="text-[#34C759]" /> Storico erogazioni
         </div>
-        <div className="wm-card overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="wm-card overflow-x-auto">
+          <table className="w-full text-sm min-w-[820px]">
             <thead className="bg-white/[0.02] border-b border-white/10">
               <tr className="text-left">
                 <th className="p-3 wm-label">Data</th>
@@ -178,11 +212,13 @@ export default function Compensi() {
                 <th className="p-3 wm-label">Metodo</th>
                 <th className="p-3 wm-label text-right">Importo</th>
                 <th className="p-3 wm-label">Note</th>
+                <th className="p-3 wm-label text-right">Azioni</th>
               </tr>
             </thead>
             <tbody>
               {erogati.slice(0, 20).map((e) => (
-                <tr key={e.id} className="border-b border-white/5">
+                <tr key={e.id} className="border-b border-white/5"
+                  data-testid={`erogato-row-${e.id}`}>
                   <td className="p-3">{fmtDate(e.data)}</td>
                   <td className="p-3">{e.tecnico_nome}</td>
                   <td className="p-3 text-white/60 text-xs">
@@ -191,8 +227,8 @@ export default function Compensi() {
                   <td className="p-3 text-white/70">{e.metodo}</td>
                   <td className="p-3 text-right font-semibold text-[#34C759]">{fmtEur(e.importo)}</td>
                   <td className="p-3 text-white/60 text-xs">{e.note}</td>
-                  <td className="p-3 text-right">
-                    <Button size="sm" variant="outline" className="border-white/20 h-8"
+                  <td className="p-3 text-right whitespace-nowrap">
+                    <Button size="sm" variant="outline" className="border-white/20 h-8 mr-1"
                       data-testid={`bustapaga-${e.id}`}
                       onClick={async () => {
                         try {
@@ -205,6 +241,22 @@ export default function Compensi() {
                       }}>
                       <Download size={12} className="mr-1" /> Busta paga
                     </Button>
+                    {isAdmin && (
+                      <>
+                        <button onClick={() => openEdit(e)}
+                          data-testid={`edit-erogato-${e.id}`}
+                          title="Modifica compenso"
+                          className="text-white/50 hover:text-[#007AFF] p-1 transition-colors">
+                          <Pencil size={14} />
+                        </button>
+                        <button onClick={() => removeErogato(e)}
+                          data-testid={`del-erogato-${e.id}`}
+                          title="Annulla compenso"
+                          className="text-white/50 hover:text-[#FF3B30] p-1 ml-1 transition-colors">
+                          <Trash2 size={14} />
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -216,9 +268,13 @@ export default function Compensi() {
         </div>
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditingId(null); }}>
         <DialogContent className="bg-[#0F0F13] border-white/10">
-          <DialogHeader><DialogTitle className="font-display">Eroga compenso</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="font-display">
+              {editingId ? "Modifica compenso erogato" : "Eroga compenso"}
+            </DialogTitle>
+          </DialogHeader>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
               <div><Label className="wm-label text-xs">Data pagamento</Label>
@@ -243,14 +299,18 @@ export default function Compensi() {
               <Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })}
                 className="bg-black/40 border-white/10" /></div>
             <div className="text-xs text-white/50">
-              Verrà creato automaticamente un movimento <b>Uscita · Compenso tecnico</b> nel libro contabile.
+              {editingId
+                ? "La modifica aggiornerà anche il movimento contabile collegato."
+                : "Verrà creato automaticamente un movimento Uscita · Compenso tecnico nel libro contabile."}
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)} className="border-white/20">Annulla</Button>
+            <Button variant="outline" onClick={() => { setOpen(false); setEditingId(null); }}
+              className="border-white/20">Annulla</Button>
             <Button onClick={saveEroga} className="bg-[#34C759] hover:bg-[#28a745] text-white"
               data-testid="confirm-eroga-btn">
-              <Wallet size={14} className="mr-1" /> Eroga
+              <Wallet size={14} className="mr-1" />
+              {editingId ? "Salva modifiche" : "Eroga"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -2,7 +2,7 @@
    Strategy: Network-first for HTML/API, cache-first for static assets.
    Keep it minimal to avoid stale UI while still enabling PWA installability.
 */
-const CACHE_VERSION = "wm-v3";
+const CACHE_VERSION = "wm-v4";
 const STATIC_ASSETS = [
   "/",
   "/manifest.json",
