@@ -104,6 +104,13 @@ class AbbonamentoCreate(BaseModel):
     data_acquisto: str
 
 
+class AbbonamentoUpdate(BaseModel):
+    lezioni_effettuate: Optional[int] = None  # target total (counted + manual)
+    num_lezioni_totali: Optional[int] = None
+    prezzo: Optional[float] = None
+    descrizione: Optional[str] = None
+
+
 # --- Lezione (collettiva) ---
 class LezionePartecipante(BaseModel):
     tesserato_id: str

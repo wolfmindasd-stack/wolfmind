@@ -20,6 +20,7 @@ from bson import ObjectId
 
 from models import (UserCreate, UserLogin, UserUpdate, TesseratoCreate, TesseratoUpdate,
                      TipoPacchettoCreate, TipoPacchettoUpdate, AbbonamentoCreate,
+                     AbbonamentoUpdate,
                      LezioneCreate, RicevutaCreate, RicevutaUpdate, MovimentoCreate,
                      MovimentoUpdate, OrganizzazioneUpdate, SendReceiptEmail,
                      SlotCreate, SlotUpdate, PrenotazioneCreate, ErogaCompenso,
@@ -269,7 +270,15 @@ async def _spesa_totale_per_tesserato(tesserato_id: str) -> float:
 
 
 @api.get("/abbonamenti")
-async def list_abbonamenti(tesserato_id: Optional[str] = None, user=Depends(current_user)):
+async def list_abbonamenti(tesserato_id: Optional[str] = None,
+                           stato: Optional[str] = None,
+                           user=Depends(current_user)):
+    """
+    stato:
+      - "attivi" (default): mostra solo abbonamenti con lezioni residue > 0
+                            (o senza limite di lezioni)
+      - "tutti" / None secondo casi legacy: mostra tutto
+    """
     q = {}
     if tesserato_id:
         q["tesserato_id"] = tesserato_id
@@ -283,14 +292,59 @@ async def list_abbonamenti(tesserato_id: Optional[str] = None, user=Depends(curr
     result = []
     for d in docs:
         s = serialize(d)
-        used = await _count_lezioni_for_abbonamento(s["id"])
+        counted = await _count_lezioni_for_abbonamento(s["id"])
+        manuali = int(s.get("lezioni_manuali") or 0)
+        used = counted + manuali
         s["lezioni_effettuate"] = used
+        s["_lezioni_contate"] = counted
+        s["_lezioni_manuali"] = manuali
         if s.get("num_lezioni_totali"):
             s["lezioni_residue"] = max(0, s["num_lezioni_totali"] - used)
+            s["attivo"] = s["lezioni_residue"] > 0
         else:
             s["lezioni_residue"] = None
+            s["attivo"] = True  # illimitato = sempre attivo
         result.append(s)
+
+    if stato == "attivi":
+        result = [r for r in result if r["attivo"]]
     return result
+
+
+@api.patch("/abbonamenti/{aid}")
+async def update_abbonamento(aid: str, payload: AbbonamentoUpdate,
+                              user=Depends(current_user)):
+    ab = await db.abbonamenti.find_one({"_id": oid(aid)})
+    if not ab:
+        raise HTTPException(status_code=404, detail="Abbonamento non trovato")
+    if user["role"] != "admin":
+        # tecnico: solo se il tesserato è suo o l'ha creato lui
+        tess = await db.tesserati.find_one({"_id": oid(ab["tesserato_id"])}) if ab.get("tesserato_id") else None
+        if not (ab.get("created_by") == user["id"] or (tess and tess.get("created_by") == user["id"])):
+            raise HTTPException(status_code=403, detail="Non autorizzato")
+
+    update = {}
+    data = payload.model_dump(exclude_unset=True)
+
+    if "lezioni_effettuate" in data and data["lezioni_effettuate"] is not None:
+        target = int(data["lezioni_effettuate"])
+        if target < 0:
+            raise HTTPException(status_code=400, detail="Il numero non può essere negativo")
+        counted = await _count_lezioni_for_abbonamento(aid)
+        # lezioni_manuali è il delta rispetto alle lezioni realmente registrate.
+        # Può essere negativo se l'utente vuole scalarne alcune.
+        update["lezioni_manuali"] = target - counted
+
+    for k in ("num_lezioni_totali", "prezzo", "descrizione"):
+        if k in data and data[k] is not None:
+            update[k] = data[k]
+
+    if not update:
+        return serialize(ab)
+
+    await db.abbonamenti.update_one({"_id": oid(aid)}, {"$set": update})
+    ab2 = await db.abbonamenti.find_one({"_id": oid(aid)})
+    return serialize(ab2)
 
 
 @api.post("/abbonamenti")
@@ -334,6 +388,93 @@ async def storico_abbonamento(aid: str, user=Depends(current_user)):
     }
 
 
+@api.get("/abbonamenti-per-cliente")
+async def abbonamenti_per_cliente(user=Depends(current_user)):
+    """
+    Storico abbonamenti raggruppati per cliente (tesserato).
+    Per ogni cliente ritorna:
+      - totale_lezioni_acquistate: somma di num_lezioni_totali dei suoi abbonamenti
+      - totale_lezioni_effettuate: somma delle lezioni realmente effettuate + aggiustamenti manuali
+      - totale_lezioni_residue: differenza (solo per abbonamenti con num_lezioni_totali)
+      - totale_speso: somma delle ricevute non annullate del tesserato
+      - abbonamenti: lista completa (attivi + esauriti) con dettaglio
+    """
+    tess_q = {}
+    if user["role"] != "admin":
+        tess_q = {"$or": [{"created_by": user["id"]}]}
+    tesserati_docs = await db.tesserati.find(tess_q).to_list(3000)
+    # se tecnico, considera anche tesserati con abbonamenti creati da lui
+    my_tess_ids = {str(t["_id"]) for t in tesserati_docs}
+    if user["role"] != "admin":
+        extra = await db.abbonamenti.find({"created_by": user["id"]},
+                                            {"tesserato_id": 1}).to_list(3000)
+        extra_ids = {a.get("tesserato_id") for a in extra if a.get("tesserato_id")}
+        missing = extra_ids - my_tess_ids
+        if missing:
+            more = await db.tesserati.find(
+                {"_id": {"$in": [oid(m) for m in missing]}}
+            ).to_list(3000)
+            tesserati_docs.extend(more)
+            my_tess_ids |= {str(t["_id"]) for t in more}
+
+    result = []
+    for t in tesserati_docs:
+        tid = str(t["_id"])
+        abbs = await db.abbonamenti.find({"tesserato_id": tid}).sort("data_acquisto", -1).to_list(500)
+        if not abbs:
+            continue
+
+        tot_acq = 0
+        tot_eff = 0
+        tot_res = 0
+        has_limit = False
+        abbs_serial = []
+        for a in abbs:
+            aid_str = str(a["_id"])
+            counted = await _count_lezioni_for_abbonamento(aid_str)
+            manuali = int(a.get("lezioni_manuali") or 0)
+            eff = counted + manuali
+            num_tot = a.get("num_lezioni_totali")
+            if num_tot:
+                has_limit = True
+                res = max(0, int(num_tot) - eff)
+                tot_acq += int(num_tot)
+                tot_res += res
+                attivo = res > 0
+            else:
+                res = None
+                attivo = True
+            tot_eff += eff
+            s = serialize(a)
+            s["lezioni_effettuate"] = eff
+            s["lezioni_residue"] = res
+            s["attivo"] = attivo
+            abbs_serial.append(s)
+
+        # spesa totale del tesserato (tutte le ricevute non annullate)
+        rics = await db.ricevute.find({"tesserato_id": tid,
+                                        "annullata": {"$ne": True}}).to_list(2000)
+        tot_speso = sum(float(r.get("totale", 0)) for r in rics)
+
+        result.append({
+            "tesserato": serialize(t),
+            "totale_lezioni_acquistate": tot_acq if has_limit else None,
+            "totale_lezioni_effettuate": tot_eff,
+            "totale_lezioni_residue": tot_res if has_limit else None,
+            "totale_speso": tot_speso,
+            "num_abbonamenti": len(abbs_serial),
+            "num_abbonamenti_attivi": sum(1 for x in abbs_serial if x["attivo"]),
+            "abbonamenti": abbs_serial,
+        })
+
+    # ordina per cognome/nome
+    result.sort(key=lambda r: (
+        (r["tesserato"].get("cognome") or "").lower(),
+        (r["tesserato"].get("nome") or "").lower(),
+    ))
+    return result
+
+
 # ============================================================
 # LEZIONI (collettive con partecipanti multipli)
 # ============================================================
@@ -363,6 +504,7 @@ async def create_lezione(payload: LezioneCreate, user=Depends(current_user)):
                                  detail=f"Abbonamento {p.abbonamento_id} non trovato")
         if ab.get("num_lezioni_totali"):
             used = await _count_lezioni_for_abbonamento(p.abbonamento_id)
+            used += int(ab.get("lezioni_manuali") or 0)
             if used >= ab["num_lezioni_totali"]:
                 tess = await db.tesserati.find_one({"_id": oid(ab["tesserato_id"])})
                 nm = f"{tess.get('cognome','')} {tess.get('nome','')}" if tess else ""

@@ -26,6 +26,11 @@ FastAPI + MongoDB + React 19 + Tailwind + Shadcn + reportlab (PDF) + Resend (ema
 - Verbali & Assemblee, Portale Tesserato, Solleciti automatici (CRON), Compensi PDF (busta paga)
 - Libro Soci PDF export
 - **PWA (2026-02)**: manifest.json + service worker + install prompt (Android/iOS via "Aggiungi a Home"), icone 192/512/maskable, meta tag apple-mobile-web-app-*, pulsante "Installa App" nella sidebar e nel login
+- **Abbonamenti evoluti (2026-02)**:
+  - Tab "Attivi" (solo abbonamenti con residue > 0 o illimitati) con 4 stat card riassuntivi
+  - Modifica manuale del numero di lezioni effettuate (icona matita → PATCH /abbonamenti/{id} con delta salvato in `lezioni_manuali`)
+  - Tab "Storico per cliente" con card raggruppate per tesserato e totali: lezioni acquistate, effettuate, residue, spesa totale
+  - Espansione card cliente → dettaglio di tutti gli abbonamenti (attivi + esauriti) con badge stato
 
 ## Roadmap / Backlog
 - P2: WhatsApp Business API (invio automatico senza wa.me manuale)
