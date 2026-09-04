@@ -18,7 +18,9 @@ const TIPI = [
 const empty = {
   tipo: "assemblea", data: todayIso(), oggetto: "",
   contenuto: "", delibere: "",
-  presenti: [], assenti: [],
+  presenti: [], assenti: [], partecipanti_remoti: [],
+  sede: "", ora_inizio: "", ora_chiusura: "", data_chiusura: "",
+  firme_abilitate: true,
 };
 
 export default function Verbali() {
@@ -30,25 +32,36 @@ export default function Verbali() {
   const [form, setForm] = useState(empty);
   const [presentiInput, setPresentiInput] = useState("");
   const [assentiInput, setAssentiInput] = useState("");
+  const [remotiInput, setRemotiInput] = useState("");
 
   const load = async () => { const { data } = await api.get("/verbali"); setList(data); };
   useEffect(() => { load(); }, []);
 
   const openNew = () => {
-    setEditingId(null); setForm(empty);
-    setPresentiInput(""); setAssentiInput(""); setOpen(true);
+    setEditingId(null); setForm({ ...empty, data_chiusura: todayIso() });
+    setPresentiInput(""); setAssentiInput(""); setRemotiInput("");
+    setOpen(true);
   };
 
   const openEdit = async (v) => {
     try {
       const { data } = await api.get(`/verbali/${v.id}`);
       setEditingId(v.id);
-      setForm({ tipo: data.tipo, data: (data.data || "").slice(0, 10),
-                oggetto: data.oggetto, contenuto: data.contenuto || "",
-                delibere: data.delibere || "",
-                presenti: data.presenti || [], assenti: data.assenti || [] });
+      setForm({
+        tipo: data.tipo, data: (data.data || "").slice(0, 10),
+        oggetto: data.oggetto, contenuto: data.contenuto || "",
+        delibere: data.delibere || "",
+        presenti: data.presenti || [], assenti: data.assenti || [],
+        partecipanti_remoti: data.partecipanti_remoti || [],
+        sede: data.sede || "",
+        ora_inizio: data.ora_inizio || "",
+        ora_chiusura: data.ora_chiusura || "",
+        data_chiusura: (data.data_chiusura || "").slice(0, 10),
+        firme_abilitate: data.firme_abilitate !== false,
+      });
       setPresentiInput((data.presenti || []).join(", "));
       setAssentiInput((data.assenti || []).join(", "));
+      setRemotiInput((data.partecipanti_remoti || []).join(", "));
       setOpen(true);
     } catch { toast.error("Errore caricamento verbale"); }
   };
@@ -59,6 +72,7 @@ export default function Verbali() {
       ...form,
       presenti: presentiInput.split(",").map((s) => s.trim()).filter(Boolean),
       assenti: assentiInput.split(",").map((s) => s.trim()).filter(Boolean),
+      partecipanti_remoti: remotiInput.split(",").map((s) => s.trim()).filter(Boolean),
     };
     try {
       if (editingId) { await api.patch(`/verbali/${editingId}`, payload); toast.success("Verbale aggiornato"); }
@@ -159,19 +173,32 @@ export default function Verbali() {
                     {TIPI.map((t) => <SelectItem key={t.v} value={t.v}>{t.l}</SelectItem>)}
                   </SelectContent>
                 </Select></div>
-              <div className="col-span-2"><Label className="wm-label text-xs">Data</Label>
+              <div><Label className="wm-label text-xs">Data apertura</Label>
                 <Input type="date" value={form.data}
                   onChange={(e) => setForm({ ...form, data: e.target.value })}
                   className="bg-black/40 border-white/10" data-testid="verbale-data" /></div>
+              <div><Label className="wm-label text-xs">Ora inizio</Label>
+                <Input type="time" value={form.ora_inizio}
+                  onChange={(e) => setForm({ ...form, ora_inizio: e.target.value })}
+                  className="bg-black/40 border-white/10" data-testid="verbale-ora-inizio" /></div>
             </div>
+            <div><Label className="wm-label text-xs">Sede assemblea</Label>
+              <Input value={form.sede}
+                onChange={(e) => setForm({ ...form, sede: e.target.value })}
+                placeholder="Es. Sede legale, Via Roma 12, Ivrea"
+                className="bg-black/40 border-white/10" data-testid="verbale-sede" /></div>
             <div><Label className="wm-label text-xs">Oggetto *</Label>
               <Input value={form.oggetto} placeholder="Es. Approvazione bilancio 2025"
                 onChange={(e) => setForm({ ...form, oggetto: e.target.value })}
                 className="bg-black/40 border-white/10" data-testid="verbale-oggetto" /></div>
-            <div><Label className="wm-label text-xs">Presenti (separati da virgola)</Label>
+            <div><Label className="wm-label text-xs">Presenti in sede (separati da virgola)</Label>
               <Input value={presentiInput} onChange={(e) => setPresentiInput(e.target.value)}
                 placeholder="Es. Mario Rossi, Luigi Bianchi, ..."
                 className="bg-black/40 border-white/10" data-testid="verbale-presenti" /></div>
+            <div><Label className="wm-label text-xs">Partecipanti da remoto</Label>
+              <Input value={remotiInput} onChange={(e) => setRemotiInput(e.target.value)}
+                placeholder="Es. Anna Verdi (Zoom), Paolo Neri (Meet)"
+                className="bg-black/40 border-white/10" data-testid="verbale-remoti" /></div>
             <div><Label className="wm-label text-xs">Assenti (separati da virgola)</Label>
               <Input value={assentiInput} onChange={(e) => setAssentiInput(e.target.value)}
                 className="bg-black/40 border-white/10" data-testid="verbale-assenti" /></div>
@@ -185,6 +212,28 @@ export default function Verbali() {
                 onChange={(e) => setForm({ ...form, delibere: e.target.value })}
                 className="w-full bg-black/40 border border-white/10 rounded px-3 py-2 text-sm"
                 data-testid="verbale-delibere" /></div>
+            <div className="grid grid-cols-2 gap-2 border-t border-white/10 pt-3">
+              <div><Label className="wm-label text-xs">Data chiusura</Label>
+                <Input type="date" value={form.data_chiusura}
+                  onChange={(e) => setForm({ ...form, data_chiusura: e.target.value })}
+                  className="bg-black/40 border-white/10" data-testid="verbale-data-chiusura" /></div>
+              <div><Label className="wm-label text-xs">Ora chiusura</Label>
+                <Input type="time" value={form.ora_chiusura}
+                  onChange={(e) => setForm({ ...form, ora_chiusura: e.target.value })}
+                  className="bg-black/40 border-white/10" data-testid="verbale-ora-chiusura" /></div>
+            </div>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" checked={form.firme_abilitate}
+                onChange={(e) => setForm({ ...form, firme_abilitate: e.target.checked })}
+                className="mt-1 h-4 w-4 accent-[#007AFF]"
+                data-testid="verbale-firme" />
+              <div>
+                <div className="text-sm font-semibold">Includi firme nel PDF</div>
+                <div className="text-[11px] text-white/50">
+                  Se disattivato, il PDF viene generato senza spazio per le firme (utile per bozze o verbali interni).
+                </div>
+              </div>
+            </label>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)} className="border-white/20">Annulla</Button>

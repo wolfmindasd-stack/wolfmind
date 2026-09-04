@@ -304,6 +304,7 @@ async def list_abbonamenti(tesserato_id: Optional[str] = None,
         else:
             s["lezioni_residue"] = None
             s["attivo"] = True  # illimitato = sempre attivo
+        s["ricevuta_generata"] = bool(s.get("ricevuta_id"))
         result.append(s)
 
     if stato == "attivi":
@@ -339,6 +340,28 @@ async def update_abbonamento(aid: str, payload: AbbonamentoUpdate,
         if k in data and data[k] is not None:
             update[k] = data[k]
 
+    # Handle full-edit of items (only admin)
+    if "items" in data and data["items"] is not None:
+        if user["role"] != "admin":
+            raise HTTPException(status_code=403,
+                                detail="Solo l'amministratore può modificare le voci")
+        items = [i if isinstance(i, dict) else i.model_dump() for i in data["items"]]
+        update["items"] = items
+        # Ricalcola prezzo se non specificato esplicitamente
+        if "prezzo" not in update:
+            update["prezzo"] = round(sum(float(i.get("importo", 0)) for i in items), 2)
+
+    if "tesserato_id" in data and data["tesserato_id"]:
+        if user["role"] != "admin":
+            raise HTTPException(status_code=403, detail="Non autorizzato")
+        update["tesserato_id"] = data["tesserato_id"]
+
+    if "data_acquisto" in data and data["data_acquisto"]:
+        update["data_acquisto"] = data["data_acquisto"]
+
+    if "metodo_pagamento" in data and data["metodo_pagamento"]:
+        update["metodo_pagamento"] = data["metodo_pagamento"]
+
     if not update:
         return serialize(ab)
 
@@ -347,22 +370,241 @@ async def update_abbonamento(aid: str, payload: AbbonamentoUpdate,
     return serialize(ab2)
 
 
+def _add_years_iso(date_str: str, years: int = 1) -> str:
+    """Aggiunge N anni a una data ISO 'YYYY-MM-DD' (o iso datetime) → 'YYYY-MM-DD'."""
+    try:
+        d = datetime.fromisoformat((date_str or "").replace("Z", "+00:00"))
+    except Exception:
+        d = datetime.now(timezone.utc)
+    try:
+        d2 = d.replace(year=d.year + years)
+    except ValueError:
+        # 29 febbraio
+        d2 = d.replace(month=2, day=28, year=d.year + years)
+    return d2.date().isoformat()
+
+
+async def _create_movimenti_for_abbonamento(ab: dict, user: dict) -> list:
+    """
+    Crea un movimento 'entrata' per ogni voce dell'abbonamento.
+    Se non ci sono voci esplicite, crea un unico movimento per il totale.
+    Ritorna la lista degli ID movimenti creati.
+    """
+    tess = await db.tesserati.find_one({"_id": oid(ab["tesserato_id"])})
+    tess_nm = f"{tess.get('cognome','')} {tess.get('nome','')}".strip() if tess else ""
+    items = ab.get("items") or []
+    created_ids = []
+    if not items:
+        importo = float(ab.get("prezzo") or 0)
+        if importo > 0:
+            res = await db.movimenti.insert_one({
+                "data": ab["data_acquisto"], "tipo": "entrata",
+                "categoria": "Abbonamento",
+                "descrizione": f"Abbonamento {ab.get('descrizione','')} - {tess_nm}".strip(" -"),
+                "importo": importo, "tecnico_id": ab.get("created_by"),
+                "abbonamento_id": str(ab["_id"]), "ricevuta_id": None,
+                "created_at": now_iso(), "created_by": user["id"]})
+            created_ids.append(str(res.inserted_id))
+        return created_ids
+    for it in items:
+        importo = float(it.get("importo") or 0)
+        if importo <= 0:
+            continue
+        cat = it.get("categoria") or "Lezioni"
+        res = await db.movimenti.insert_one({
+            "data": ab["data_acquisto"], "tipo": "entrata",
+            "categoria": cat,
+            "descrizione": f"{it.get('descrizione','')} - {tess_nm}".strip(" -"),
+            "importo": importo, "tecnico_id": ab.get("created_by"),
+            "abbonamento_id": str(ab["_id"]), "ricevuta_id": None,
+            "created_at": now_iso(), "created_by": user["id"]})
+        created_ids.append(str(res.inserted_id))
+    return created_ids
+
+
+async def _create_ricevuta_for_abbonamento(ab: dict, user: dict) -> Optional[dict]:
+    """
+    Crea una ricevuta collegata all'abbonamento. Usa le voci come items ricevuta.
+    """
+    tesserato = await db.tesserati.find_one({"_id": oid(ab["tesserato_id"])})
+    if not tesserato:
+        return None
+    year = datetime.now(timezone.utc).year
+    try:
+        year = datetime.fromisoformat(ab["data_acquisto"].replace("Z", "+00:00")).year
+    except Exception:
+        pass
+    numero, seq = await _next_receipt_number(year)
+    items = ab.get("items") or []
+    if not items:
+        items = [{
+            "descrizione": ab.get("descrizione", "Abbonamento"),
+            "num_lezioni": ab.get("num_lezioni_totali"),
+            "importo": float(ab.get("prezzo") or 0),
+            "abbonamento_id": str(ab["_id"]),
+            "tipo_pacchetto_id": ab.get("tipo_pacchetto_id"),
+            "esclude_da_compensi": False,
+            "categoria": "Lezioni",
+        }]
+    else:
+        # normalizza per ricevuta
+        items = [{
+            "descrizione": it.get("descrizione", ""),
+            "num_lezioni": it.get("num_lezioni"),
+            "importo": float(it.get("importo", 0)),
+            "abbonamento_id": str(ab["_id"]),
+            "tipo_pacchetto_id": it.get("tipo_pacchetto_id"),
+            "esclude_da_compensi": (it.get("categoria") in ("Quota associativa", "Merchandising")),
+            "categoria": it.get("categoria", "Lezioni"),
+        } for it in items]
+    totale = round(sum(float(i.get("importo", 0)) for i in items), 2)
+    public_token = secrets.token_urlsafe(24)
+    doc = {"numero": numero, "seq": seq, "anno": year,
+           "data": ab["data_acquisto"],
+           "tesserato_id": str(tesserato["_id"]),
+           "tesserato_nome": f"{tesserato['cognome']} {tesserato['nome']}",
+           "metodo_pagamento": ab.get("metodo_pagamento") or "Contanti",
+           "items": items, "totale": totale, "note": "Generata da abbonamento",
+           "emesso_da_id": user["id"], "emesso_da_nome": user["name"],
+           "emesso_per_id": ab.get("created_by") or user["id"],
+           "emesso_per_nome": user["name"],
+           "annullata": False, "public_token": public_token,
+           "abbonamento_id": str(ab["_id"]),
+           "created_at": now_iso()}
+    res = await db.ricevute.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return doc
+
+
+async def _handle_quota_tessera(ab: dict) -> None:
+    """
+    Se una voce dell'abbonamento è 'Quota associativa', aggiorna la scadenza
+    di tesseramento del tesserato (data_acquisto + 1 anno) se non già più avanti.
+    """
+    items = ab.get("items") or []
+    has_quota = any((it.get("categoria") == "Quota associativa") for it in items)
+    if not has_quota:
+        return
+    new_exp = _add_years_iso(ab["data_acquisto"], 1)
+    tess = await db.tesserati.find_one({"_id": oid(ab["tesserato_id"])})
+    if not tess:
+        return
+    cur = (tess.get("scadenza_tesseramento") or "")[:10]
+    if not cur or new_exp > cur:
+        await db.tesserati.update_one(
+            {"_id": tess["_id"]},
+            {"$set": {"scadenza_tesseramento": new_exp}})
+
+
 @api.post("/abbonamenti")
 async def create_abbonamento(payload: AbbonamentoCreate, user=Depends(current_user)):
-    doc = payload.model_dump(); doc["created_at"] = now_iso()
+    doc = payload.model_dump()
+    doc["created_at"] = now_iso()
     doc["created_by"] = user["id"]
+
+    # Normalizza items
+    items = doc.get("items") or []
+    if items:
+        # ricalcola prezzo dagli items
+        doc["prezzo"] = round(sum(float(i.get("importo", 0)) for i in items), 2)
+        # somma num_lezioni per num_lezioni_totali se non impostato
+        if not doc.get("num_lezioni_totali"):
+            tot_lez = sum(int(i.get("num_lezioni") or 0)
+                          for i in items if i.get("categoria") == "Lezioni")
+            if tot_lez > 0:
+                doc["num_lezioni_totali"] = tot_lez
+
+    crea_ricevuta_flag = doc.pop("crea_ricevuta", None)
+    metodo_pagamento = doc.pop("metodo_pagamento", "Contanti")
+    doc["metodo_pagamento"] = metodo_pagamento
+
     res = await db.abbonamenti.insert_one(doc)
     doc["_id"] = res.inserted_id
-    return serialize(doc)
+    aid = str(res.inserted_id)
+
+    # 1) Aggiorna scadenza tesseramento se c'è quota associativa
+    await _handle_quota_tessera(doc)
+
+    # 2) Auto ricevuta (se flag esplicito o impostazione organizzazione)
+    if crea_ricevuta_flag is None:
+        org = await db.organizzazione.find_one({"_id": "config"}) or {}
+        crea_ricevuta_flag = bool(org.get("auto_ricevuta_abbonamento"))
+    ricevuta_id = None
+    if crea_ricevuta_flag:
+        ric = await _create_ricevuta_for_abbonamento(doc, user)
+        if ric:
+            ricevuta_id = str(ric["_id"])
+            await db.abbonamenti.update_one(
+                {"_id": res.inserted_id},
+                {"$set": {"ricevuta_id": ricevuta_id,
+                          "ricevuta_numero": ric.get("numero")}})
+            doc["ricevuta_id"] = ricevuta_id
+            doc["ricevuta_numero"] = ric.get("numero")
+            # Il movimento sarà quello della ricevuta (già creato dall'endpoint ricevute)
+            # Ma la ricevuta è creata inline qui senza il suo movimento, quindi lo creiamo:
+            await db.movimenti.insert_one({
+                "data": ric["data"], "tipo": "entrata",
+                "categoria": "Ricevuta",
+                "descrizione": f"Ricevuta N.{ric['numero']} - {ric['tesserato_nome']}",
+                "importo": ric["totale"],
+                "tecnico_id": ric.get("emesso_per_id"),
+                "ricevuta_id": ricevuta_id,
+                "abbonamento_id": aid,
+                "created_at": now_iso(), "created_by": user["id"]})
+        else:
+            # Se ricevuta non creata (tesserato mancante), crea movimenti separati
+            await _create_movimenti_for_abbonamento(doc, user)
+    else:
+        # 3) Nessuna ricevuta → crea movimenti separati per voce
+        await _create_movimenti_for_abbonamento(doc, user)
+
+    # Ricarica per restituire con eventuale ricevuta_id
+    doc2 = await db.abbonamenti.find_one({"_id": res.inserted_id})
+    return serialize(doc2)
 
 
 @api.delete("/abbonamenti/{aid}")
 async def delete_abbonamento(aid: str, user=Depends(current_user)):
     require_admin(user)
-    res = await db.abbonamenti.delete_one({"_id": oid(aid)})
-    if res.deleted_count == 0:
+    ab = await db.abbonamenti.find_one({"_id": oid(aid)})
+    if not ab:
         raise HTTPException(status_code=404, detail="Abbonamento non trovato")
+    # Rimuovi movimenti collegati (solo quelli generati automaticamente dall'abbonamento)
+    await db.movimenti.delete_many({"abbonamento_id": aid})
+    # Se c'è una ricevuta collegata, non la elimino ma segnalo lo scollegamento
+    if ab.get("ricevuta_id"):
+        await db.ricevute.update_one(
+            {"_id": oid(ab["ricevuta_id"])},
+            {"$unset": {"abbonamento_id": ""}})
+    await db.abbonamenti.delete_one({"_id": oid(aid)})
     return {"ok": True}
+
+
+@api.post("/abbonamenti/{aid}/genera-ricevuta")
+async def genera_ricevuta_per_abbonamento(aid: str, user=Depends(current_user)):
+    """Genera manualmente la ricevuta per un abbonamento (se non ancora esistente)."""
+    ab = await db.abbonamenti.find_one({"_id": oid(aid)})
+    if not ab:
+        raise HTTPException(status_code=404, detail="Abbonamento non trovato")
+    if ab.get("ricevuta_id"):
+        raise HTTPException(status_code=400, detail="Ricevuta già generata")
+    ric = await _create_ricevuta_for_abbonamento(ab, user)
+    if not ric:
+        raise HTTPException(status_code=400, detail="Impossibile creare ricevuta")
+    rid = str(ric["_id"])
+    await db.abbonamenti.update_one(
+        {"_id": oid(aid)},
+        {"$set": {"ricevuta_id": rid, "ricevuta_numero": ric.get("numero")}})
+    # Rimuovi movimenti "generici" e crea quello della ricevuta
+    await db.movimenti.delete_many({"abbonamento_id": aid, "ricevuta_id": None})
+    await db.movimenti.insert_one({
+        "data": ric["data"], "tipo": "entrata", "categoria": "Ricevuta",
+        "descrizione": f"Ricevuta N.{ric['numero']} - {ric['tesserato_nome']}",
+        "importo": ric["totale"],
+        "tecnico_id": ric.get("emesso_per_id"),
+        "ricevuta_id": rid, "abbonamento_id": aid,
+        "created_at": now_iso(), "created_by": user["id"]})
+    return {"ok": True, "ricevuta_id": rid, "numero": ric.get("numero")}
 
 
 @api.get("/abbonamenti/{aid}/storico")
@@ -1284,11 +1526,20 @@ async def compensi(date_from: Optional[str] = None, date_to: Optional[str] = Non
                     flusso_compensabile += float(it.get("importo", 0))
         perc = float(t.get("percentuale_compenso") or 0)
         compenso = flusso_compensabile * perc / 100.0
+        # Già erogato nel periodo per questo tecnico
+        erogati_docs = await db.compensi_erogati.find({
+            "tecnico_id": tid,
+            "data": {"$gte": date_from, "$lte": date_to + "T23:59:59"}
+        }).to_list(500)
+        gia_erogato = sum(float(e.get("importo", 0)) for e in erogati_docs)
+        da_erogare = max(0.0, round(compenso - gia_erogato, 2))
         result.append({"tecnico_id": tid, "tecnico_nome": t.get("name"),
                        "percentuale": perc, "n_ricevute": len(rics),
                        "flusso_generato": flusso_totale,
                        "flusso_compensabile": flusso_compensabile,
-                       "compenso_dovuto": compenso})
+                       "compenso_dovuto": compenso,
+                       "gia_erogato": round(gia_erogato, 2),
+                       "da_erogare": da_erogare})
     return {"compensi": result, "date_from": date_from, "date_to": date_to}
 
 

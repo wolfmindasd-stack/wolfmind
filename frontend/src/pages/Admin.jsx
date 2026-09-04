@@ -346,7 +346,9 @@ function OrgTab() {
       const payload = { name: org.name, address: org.address, fiscal_code: org.fiscal_code,
         email: org.email, pec: org.pec, affiliation: org.affiliation,
         president_name: org.president_name, logo_base64: org.logo_base64,
-        president_signature_base64: org.president_signature_base64 };
+        president_signature_base64: org.president_signature_base64,
+        secretary_signature_base64: org.secretary_signature_base64,
+        auto_ricevuta_abbonamento: !!org.auto_ricevuta_abbonamento };
       await api.patch("/organizzazione", payload);
       toast.success("Salvato");
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
@@ -363,6 +365,13 @@ function OrgTab() {
     const f = e.target.files?.[0]; if (!f) return;
     const reader = new FileReader();
     reader.onload = () => setOrg({ ...org, president_signature_base64: reader.result });
+    reader.readAsDataURL(f);
+  };
+
+  const uploadSecretarySignature = (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => setOrg({ ...org, secretary_signature_base64: reader.result });
     reader.readAsDataURL(f);
   };
 
@@ -413,6 +422,41 @@ function OrgTab() {
         <div className="text-xs text-white/40 mt-1">
           La firma apparirà sopra il nome del Presidente in ogni ricevuta PDF.
         </div>
+      </div>
+      <div>
+        <Label className="wm-label text-xs">Firma digitalizzata Segretario (PNG con sfondo trasparente consigliato)</Label>
+        <div className="flex items-center gap-4 mt-2">
+          {org.secretary_signature_base64 && (
+            <img src={org.secretary_signature_base64} alt="secretary-signature"
+              className="h-14 w-40 object-contain bg-white/95 rounded p-1" />
+          )}
+          <input type="file" accept="image/*" onChange={uploadSecretarySignature}
+            data-testid="org-secretary-signature-upload" className="text-sm text-white/60" />
+          {org.secretary_signature_base64 && (
+            <Button size="sm" variant="ghost" className="text-[#FF3B30]"
+              onClick={() => setOrg({ ...org, secretary_signature_base64: null })}>Rimuovi</Button>
+          )}
+        </div>
+        <div className="text-xs text-white/40 mt-1">
+          Utilizzata su verbali e buste paga sopra la firma "Il Segretario".
+        </div>
+      </div>
+      <div className="border-t border-white/10 pt-4">
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!org.auto_ricevuta_abbonamento}
+            onChange={(e) => setOrg({ ...org, auto_ricevuta_abbonamento: e.target.checked })}
+            data-testid="org-auto-ricevuta"
+            className="mt-1 h-4 w-4 accent-[#007AFF]"
+          />
+          <div>
+            <div className="font-semibold text-sm">Genera ricevuta automatica per ogni nuovo abbonamento</div>
+            <div className="text-xs text-white/50 mt-0.5">
+              Quando attiva, ogni nuovo abbonamento crea automaticamente una ricevuta con progressivo annuale e la registra nel libro contabile.
+            </div>
+          </div>
+        </label>
       </div>
       <div className="flex justify-end">
         <Button onClick={save} className="bg-[#007AFF] hover:bg-[#005BB5]"

@@ -95,6 +95,17 @@ class TipoPacchettoUpdate(BaseModel):
 
 
 # --- Abbonamento ---
+CATEGORIE_ABB = Literal["Lezioni", "Quota associativa", "Merchandising", "Altro"]
+
+
+class AbbonamentoItem(BaseModel):
+    descrizione: str
+    categoria: CATEGORIE_ABB = "Lezioni"
+    num_lezioni: Optional[int] = None
+    importo: float
+    tipo_pacchetto_id: Optional[str] = None
+
+
 class AbbonamentoCreate(BaseModel):
     tesserato_id: str
     tipo_pacchetto_id: Optional[str] = None
@@ -102,13 +113,20 @@ class AbbonamentoCreate(BaseModel):
     num_lezioni_totali: Optional[int] = None
     prezzo: float
     data_acquisto: str
+    items: List[AbbonamentoItem] = Field(default_factory=list)
+    metodo_pagamento: str = "Contanti"
+    crea_ricevuta: Optional[bool] = None  # None = usa impostazione admin
 
 
 class AbbonamentoUpdate(BaseModel):
+    tesserato_id: Optional[str] = None
+    data_acquisto: Optional[str] = None
     lezioni_effettuate: Optional[int] = None  # target total (counted + manual)
     num_lezioni_totali: Optional[int] = None
     prezzo: Optional[float] = None
     descrizione: Optional[str] = None
+    items: Optional[List[AbbonamentoItem]] = None
+    metodo_pagamento: Optional[str] = None
 
 
 # --- Lezione (collettiva) ---
@@ -184,6 +202,8 @@ class OrganizzazioneUpdate(BaseModel):
     president_name: Optional[str] = None
     logo_base64: Optional[str] = None
     president_signature_base64: Optional[str] = None
+    secretary_signature_base64: Optional[str] = None
+    auto_ricevuta_abbonamento: Optional[bool] = None
 
 
 class SendReceiptEmail(BaseModel):
@@ -239,8 +259,14 @@ class VerbaleCreate(BaseModel):
     contenuto: str = ""
     presenti: List[str] = Field(default_factory=list)
     assenti: List[str] = Field(default_factory=list)
+    partecipanti_remoti: List[str] = Field(default_factory=list)
     delibere: str = ""
     allegato_base64: Optional[str] = None
+    sede: Optional[str] = ""
+    ora_inizio: Optional[str] = None  # HH:MM
+    ora_chiusura: Optional[str] = None  # HH:MM
+    data_chiusura: Optional[str] = None  # YYYY-MM-DD (spesso uguale a data)
+    firme_abilitate: bool = True
 
 
 class VerbaleUpdate(BaseModel):
@@ -250,8 +276,14 @@ class VerbaleUpdate(BaseModel):
     contenuto: Optional[str] = None
     presenti: Optional[List[str]] = None
     assenti: Optional[List[str]] = None
+    partecipanti_remoti: Optional[List[str]] = None
     delibere: Optional[str] = None
     allegato_base64: Optional[str] = None
+    sede: Optional[str] = None
+    ora_inizio: Optional[str] = None
+    ora_chiusura: Optional[str] = None
+    data_chiusura: Optional[str] = None
+    firme_abilitate: Optional[bool] = None
 
 
 # --- Numeratore Ricevute ---

@@ -58,6 +58,7 @@ export default function Compensi() {
 
   const totFlusso = data.compensi.reduce((s, c) => s + c.flusso_generato, 0);
   const totComp = data.compensi.reduce((s, c) => s + c.compenso_dovuto, 0);
+  const totDaEr = data.compensi.reduce((s, c) => s + (c.da_erogare || 0), 0);
   const totErogato = erogati
     .filter((x) => x.data >= from && x.data <= to + "T23:59:59")
     .reduce((s, x) => s + x.importo, 0);
@@ -72,7 +73,23 @@ export default function Compensi() {
         </p>
       </div>
 
-      <div className="wm-card p-4 flex items-end gap-3">
+      {/* Alert Da Erogare */}
+      {totDaEr > 0.01 && (
+        <div className="wm-card p-5 border-l-4 border-[#FFCC00] bg-[#FFCC00]/5 flex flex-col sm:flex-row sm:items-center gap-3"
+          data-testid="alert-da-compensare">
+          <div className="flex-1">
+            <div className="wm-label text-[10px] text-[#FFCC00]">Attenzione</div>
+            <div className="font-display text-2xl sm:text-3xl font-black text-[#FFCC00] mt-1">
+              Ancora da compensare: {fmtEur(totDaEr)}
+            </div>
+            <div className="text-xs text-white/60 mt-1">
+              {data.compensi.filter((c) => (c.da_erogare || 0) > 0.01).length} tecnico/i con compensi maturati non ancora erogati nel periodo selezionato.
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="wm-card p-4 flex items-end gap-3 flex-wrap">
         <div><label className="wm-label">Da</label>
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
             className="block mt-1 bg-black/40 border border-white/10 rounded px-3 py-2 text-sm" /></div>
@@ -85,17 +102,21 @@ export default function Compensi() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="wm-card p-5"><div className="wm-label">Flusso cassa totale</div>
           <div className="mt-2 font-display text-2xl font-bold">{fmtEur(totFlusso)}</div></div>
         <div className="wm-card p-5"><div className="wm-label">Compensi maturati</div>
           <div className="mt-2 font-display text-2xl font-bold text-[#FFCC00]">{fmtEur(totComp)}</div></div>
         <div className="wm-card p-5"><div className="wm-label">Compensi erogati</div>
           <div className="mt-2 font-display text-2xl font-bold text-[#34C759]">{fmtEur(totErogato)}</div></div>
+        <div className="wm-card p-5 border border-[#FFCC00]/40"><div className="wm-label text-[#FFCC00]">Da compensare</div>
+          <div className="mt-2 font-display text-2xl font-bold text-[#FFCC00]" data-testid="tot-da-compensare">
+            {fmtEur(totDaEr)}
+          </div></div>
       </div>
 
-      <div className="wm-card overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="wm-card overflow-x-auto">
+        <table className="w-full text-sm min-w-[820px]">
           <thead className="bg-white/[0.02] border-b border-white/10">
             <tr className="text-left">
               <th className="p-3 wm-label">Tecnico</th>
@@ -103,7 +124,9 @@ export default function Compensi() {
               <th className="p-3 wm-label text-right">Flusso totale</th>
               <th className="p-3 wm-label text-right">Compensabile</th>
               <th className="p-3 wm-label text-center">%</th>
-              <th className="p-3 wm-label text-right">Compenso dovuto</th>
+              <th className="p-3 wm-label text-right">Maturato</th>
+              <th className="p-3 wm-label text-right">Erogato</th>
+              <th className="p-3 wm-label text-right">Da erogare</th>
               {isAdmin && <th className="p-3 wm-label text-right">Azione</th>}
             </tr>
           </thead>
@@ -117,10 +140,16 @@ export default function Compensi() {
                 <td className="p-3 text-right font-semibold">{fmtEur(c.flusso_compensabile)}</td>
                 <td className="p-3 text-center">{c.percentuale}%</td>
                 <td className="p-3 text-right font-semibold text-[#FFCC00]">{fmtEur(c.compenso_dovuto)}</td>
+                <td className="p-3 text-right text-[#34C759]">{fmtEur(c.gia_erogato || 0)}</td>
+                <td className={`p-3 text-right font-bold ${
+                  (c.da_erogare || 0) > 0.01 ? "text-[#FFCC00]" : "text-white/40"}`}
+                  data-testid={`da-erogare-${c.tecnico_id}`}>
+                  {fmtEur(c.da_erogare || 0)}
+                </td>
                 {isAdmin && (
                   <td className="p-3 text-right">
-                    <Button size="sm" onClick={() => eroga(c)} disabled={c.compenso_dovuto <= 0}
-                      className="bg-[#34C759]/20 border border-[#34C759]/50 text-[#34C759] hover:bg-[#34C759]/30"
+                    <Button size="sm" onClick={() => eroga(c)} disabled={(c.da_erogare || 0) <= 0.01}
+                      className="bg-[#34C759]/20 border border-[#34C759]/50 text-[#34C759] hover:bg-[#34C759]/30 disabled:opacity-40"
                       data-testid={`eroga-btn-${c.tecnico_id}`}>
                       <Wallet size={12} className="mr-1" /> Eroga
                     </Button>
@@ -129,7 +158,7 @@ export default function Compensi() {
               </tr>
             ))}
             {data.compensi.length === 0 && (
-              <tr><td colSpan={isAdmin ? 7 : 6} className="p-8 text-center text-white/40">Nessun tecnico</td></tr>
+              <tr><td colSpan={isAdmin ? 9 : 8} className="p-8 text-center text-white/40">Nessun tecnico</td></tr>
             )}
           </tbody>
         </table>

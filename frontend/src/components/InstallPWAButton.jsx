@@ -120,18 +120,22 @@ export default function InstallPWAButton({ compact = false }) {
                 <li className="flex gap-2">
                   <span className="text-[#34C759] font-bold">1.</span>
                   <span>
-                    Apri il menu del browser (i tre puntini <b>⋮</b>).
+                    Apri questa pagina con <b>Chrome</b>, <b>Edge</b> o <b>Brave</b> su Windows/Mac.
                   </span>
                 </li>
                 <li className="flex gap-2">
                   <span className="text-[#34C759] font-bold">2.</span>
                   <span>
-                    Scegli <b>"Installa app"</b> o <b>"Aggiungi a schermata Home"</b>.
+                    Nella barra dell'indirizzo cerca l'icona <b>Installa</b> a destra dell'URL,
+                    oppure apri il menu <b>⋮</b> e scegli <b>"Installa app"</b>.
                   </span>
                 </li>
                 <li className="flex gap-2">
                   <span className="text-[#34C759] font-bold">3.</span>
-                  <span>Conferma per aggiungere l'icona alla home del dispositivo.</span>
+                  <span>
+                    Conferma: comparirà una <b>scorciatoia sul desktop</b> e nel menu Start/Launchpad,
+                    esattamente come un programma nativo.
+                  </span>
                 </li>
               </ol>
             )}

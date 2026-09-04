@@ -14,10 +14,10 @@ import InstallPWAButton from "./InstallPWAButton";
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testid: "nav-dashboard" },
   { to: "/tesserati", label: "Tesserati", icon: Users, testid: "nav-tesserati" },
-  { to: "/libro-soci", label: "Libro Soci", icon: BookUser, testid: "nav-libro-soci" },
-  { to: "/ricevute", label: "Ricevute", icon: Receipt, testid: "nav-ricevute" },
   { to: "/abbonamenti", label: "Abbonamenti", icon: Package, testid: "nav-abbonamenti" },
+  { to: "/ricevute", label: "Ricevute", icon: Receipt, testid: "nav-ricevute" },
   { to: "/calendario", label: "Calendario", icon: Calendar, testid: "nav-calendario" },
+  { to: "/libro-soci", label: "Libro Soci", icon: BookUser, testid: "nav-libro-soci" },
   { to: "/movimenti", label: "Libro Contabile", icon: BookOpen, testid: "nav-movimenti" },
   { to: "/compensi", label: "Compensi", icon: Wallet, testid: "nav-compensi" },
   { to: "/verbali", label: "Verbali", icon: ScrollText, testid: "nav-verbali" },

@@ -460,19 +460,30 @@ def generate_verbale_pdf(org: dict, verbale: dict) -> bytes:
              "ALTRO": "VERBALE"}.get(tipo, "VERBALE")
     story = [_header(org, st), Spacer(1, 8 * mm),
              Paragraph(title, st["title"]),
-             Spacer(1, 3 * mm),
-             Paragraph(f"Data: <b>{_fmt_date(verbale.get('data'))}</b>", st["period"]),
-             Spacer(1, 6 * mm),
-             _section_bar("OGGETTO", st),
-             Paragraph(verbale.get("oggetto", ""), st["val"]),
-             Spacer(1, 4 * mm)]
+             Spacer(1, 3 * mm)]
+
+    # Riga: data · sede · ora
+    intestazione_parts = [f"Data: <b>{_fmt_date(verbale.get('data'))}</b>"]
+    if verbale.get("sede"):
+        intestazione_parts.append(f"Sede: <b>{verbale['sede']}</b>")
+    if verbale.get("ora_inizio"):
+        intestazione_parts.append(f"Ora inizio: <b>{verbale['ora_inizio']}</b>")
+    story.append(Paragraph(" &nbsp; · &nbsp; ".join(intestazione_parts), st["period"]))
+
+    story += [Spacer(1, 6 * mm),
+              _section_bar("OGGETTO", st),
+              Paragraph(verbale.get("oggetto", ""), st["val"]),
+              Spacer(1, 4 * mm)]
 
     presenti = verbale.get("presenti") or []
     assenti = verbale.get("assenti") or []
-    if presenti or assenti:
+    remoti = verbale.get("partecipanti_remoti") or []
+    if presenti or assenti or remoti:
         story.append(_section_bar("PARTECIPANTI", st))
         if presenti:
-            story.append(Paragraph(f"<b>Presenti ({len(presenti)}):</b> " + ", ".join(presenti), st["val"]))
+            story.append(Paragraph(f"<b>Presenti in sede ({len(presenti)}):</b> " + ", ".join(presenti), st["val"]))
+        if remoti:
+            story.append(Paragraph(f"<b>Partecipanti da remoto ({len(remoti)}):</b> " + ", ".join(remoti), st["val"]))
         if assenti:
             story.append(Paragraph(f"<b>Assenti:</b> " + ", ".join(assenti), st["val"]))
         story.append(Spacer(1, 4 * mm))
@@ -491,22 +502,39 @@ def generate_verbale_pdf(org: dict, verbale: dict) -> bytes:
                 story.append(Paragraph(para.replace("\n", "<br/>"), st["val"]))
                 story.append(Spacer(1, 3 * mm))
 
-    story.append(Spacer(1, 12 * mm))
-    signature = _image_from_b64(org.get("president_signature_base64"), 55, 18)
-    firma = [[Paragraph("Il Segretario", ParagraphStyle("sg", fontSize=10,
-                                                          alignment=TA_CENTER, fontName="Helvetica-Bold")),
-              signature if signature else Paragraph(" ", st["val"])],
-             ["", Paragraph("Il Presidente", ParagraphStyle("pr", fontSize=10,
+    # Chiusura
+    if verbale.get("ora_chiusura") or verbale.get("data_chiusura"):
+        chius_parts = []
+        if verbale.get("data_chiusura"):
+            chius_parts.append(f"il <b>{_fmt_date(verbale['data_chiusura'])}</b>")
+        if verbale.get("ora_chiusura"):
+            chius_parts.append(f"alle ore <b>{verbale['ora_chiusura']}</b>")
+        if chius_parts:
+            story.append(Spacer(1, 4 * mm))
+            story.append(Paragraph(
+                "La seduta si chiude " + " ".join(chius_parts) + ".",
+                st["val"]))
+
+    firme_on = verbale.get("firme_abilitate", True)
+    if firme_on:
+        story.append(Spacer(1, 12 * mm))
+        pres_sig = _image_from_b64(org.get("president_signature_base64"), 55, 18)
+        secr_sig = _image_from_b64(org.get("secretary_signature_base64"), 55, 18)
+        firma = [[Paragraph("Il Segretario", ParagraphStyle("sg", fontSize=10,
+                                                              alignment=TA_CENTER, fontName="Helvetica-Bold")),
+                  Paragraph("Il Presidente", ParagraphStyle("pr", fontSize=10,
                                                               alignment=TA_CENTER, fontName="Helvetica-Bold"))],
-             ["", Paragraph(f"<i>{org.get('president_name', 'Drovetti Cassiano Bruno')}</i>",
-                              ParagraphStyle("pn", fontSize=10, alignment=TA_CENTER,
-                                              fontName="Helvetica-Oblique"))]]
-    fs = Table(firma, colWidths=[90 * mm, 90 * mm], rowHeights=[20 * mm, 5 * mm, 5 * mm])
-    fs.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
-                             ("LINEABOVE", (0, 1), (0, 1), 0.5, colors.black),
-                             ("LINEABOVE", (1, 1), (1, 1), 0.5, colors.black),
-                             ("TOPPADDING", (0, 1), (-1, 1), 4)]))
-    story.append(fs)
+                 [secr_sig if secr_sig else Paragraph(" ", st["val"]),
+                  pres_sig if pres_sig else Paragraph(" ", st["val"])],
+                 ["", Paragraph(f"<i>{org.get('president_name', 'Drovetti Cassiano Bruno')}</i>",
+                                  ParagraphStyle("pn", fontSize=10, alignment=TA_CENTER,
+                                                  fontName="Helvetica-Oblique"))]]
+        fs = Table(firma, colWidths=[90 * mm, 90 * mm], rowHeights=[6 * mm, 18 * mm, 5 * mm])
+        fs.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                                 ("LINEBELOW", (0, 1), (0, 1), 0.5, colors.black),
+                                 ("LINEBELOW", (1, 1), (1, 1), 0.5, colors.black)]))
+        story.append(fs)
     story.append(Spacer(1, 8 * mm))
     story.append(Paragraph(_footer_text(org), st["center_small"]))
     doc.build(story)
@@ -514,7 +542,11 @@ def generate_verbale_pdf(org: dict, verbale: dict) -> bytes:
 
 
 def generate_compenso_pdf(org: dict, comp: dict, tecnico: dict, dettaglio_ricevute: list = None) -> bytes:
-    """Busta paga stile PDF per un compenso erogato."""
+    """Busta paga stile PDF per un compenso erogato — 2 pagine:
+    Pagina 1: dati, importo, firme (segretario + presidente)
+    Pagina 2: riepilogo ricevute che hanno generato il compenso
+    """
+    from reportlab.platypus import PageBreak
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm,
                             topMargin=15 * mm, bottomMargin=15 * mm)
@@ -569,21 +601,63 @@ def generate_compenso_pdf(org: dict, comp: dict, tecnico: dict, dettaglio_ricevu
         story.append(Paragraph(f"<b>Note:</b> {comp['note']}", st["val"]))
         story.append(Spacer(1, 5 * mm))
 
+    # Firme in pagina 1: Segretario + Presidente
+    story.append(Spacer(1, 15 * mm))
+    pres_sig = _image_from_b64(org.get("president_signature_base64"), 55, 18)
+    secr_sig = _image_from_b64(org.get("secretary_signature_base64"), 55, 18)
+    firma = [[Paragraph("Il Segretario", ParagraphStyle("sg", fontSize=10,
+                                                          alignment=TA_CENTER, fontName="Helvetica-Bold")),
+              Paragraph("Il Presidente", ParagraphStyle("pr", fontSize=10,
+                                                          alignment=TA_CENTER, fontName="Helvetica-Bold"))],
+             [secr_sig if secr_sig else Paragraph(" ", st["val"]),
+              pres_sig if pres_sig else Paragraph(" ", st["val"])],
+             ["",
+              Paragraph(f"<i>{org.get('president_name', 'Drovetti Cassiano Bruno')}</i>",
+                          ParagraphStyle("pn", fontSize=10, alignment=TA_CENTER,
+                                          fontName="Helvetica-Oblique"))]]
+    fs = Table(firma, colWidths=[90 * mm, 90 * mm], rowHeights=[6 * mm, 20 * mm, 5 * mm])
+    fs.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                             ("LINEBELOW", (0, 1), (0, 1), 0.5, colors.black),
+                             ("LINEBELOW", (1, 1), (1, 1), 0.5, colors.black)]))
+    story.append(fs)
+    story.append(Spacer(1, 8 * mm))
+    story.append(Paragraph(_footer_text(org), st["center_small"]))
+
+    # ---------- PAGINA 2: riepilogo ricevute ----------
     if dettaglio_ricevute:
-        story.append(_section_bar(f"RICEVUTE DEL PERIODO ({len(dettaglio_ricevute)})", st))
+        story.append(PageBreak())
+        story.append(_header(org, st))
+        story.append(Spacer(1, 6 * mm))
+        story.append(Paragraph(
+            f"RIEPILOGO RICEVUTE - {tecnico.get('name','')}", st["title"]))
+        story.append(Spacer(1, 3 * mm))
+        if periodo:
+            story.append(Paragraph(f"Periodo: <b>{periodo}</b>", st["period"]))
+        story.append(Spacer(1, 6 * mm))
+        story.append(_section_bar(
+            f"RICEVUTE INCLUSE ({len(dettaglio_ricevute)})", st))
         rows = [[Paragraph("<b>Numero</b>", st["val"]),
                  Paragraph("<b>Data</b>", st["val"]),
                  Paragraph("<b>Tesserato</b>", st["val"]),
                  Paragraph("<b>Totale</b>",
                             ParagraphStyle("h", fontSize=10, alignment=TA_RIGHT, fontName="Helvetica-Bold"))]]
+        tot_r = 0.0
         for r in dettaglio_ricevute:
             rows.append([Paragraph(r.get("numero", ""), st["val"]),
                          Paragraph(_fmt_date(r.get("data")), st["val"]),
                          Paragraph(r.get("tesserato_nome", ""), st["val"]),
                          Paragraph(_fmt_eur(r.get("totale", 0)),
                                     ParagraphStyle("i", fontSize=9, alignment=TA_RIGHT))])
+            tot_r += float(r.get("totale", 0))
+        rows.append([Paragraph("", st["val"]), Paragraph("", st["val"]),
+                     Paragraph("<b>TOTALE</b>",
+                                ParagraphStyle("tt", fontSize=10, alignment=TA_RIGHT, fontName="Helvetica-Bold")),
+                     Paragraph(f"<b>{_fmt_eur(tot_r)}</b>",
+                                ParagraphStyle("tt2", fontSize=10, alignment=TA_RIGHT, fontName="Helvetica-Bold"))])
         rt = Table(rows, colWidths=[30 * mm, 25 * mm, 80 * mm, 45 * mm], repeatRows=1)
         rt.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), LIGHT),
+                                 ("BACKGROUND", (0, -1), (-1, -1), LIGHT),
                                  ("GRID", (0, 0), (-1, -1), 0.3, BORDER),
                                  ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                                  ("FONTSIZE", (0, 0), (-1, -1), 9),
@@ -592,25 +666,9 @@ def generate_compenso_pdf(org: dict, comp: dict, tecnico: dict, dettaglio_ricevu
                                  ("TOPPADDING", (0, 0), (-1, -1), 4),
                                  ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
         story.append(rt)
+        story.append(Spacer(1, 8 * mm))
+        story.append(Paragraph(_footer_text(org), st["center_small"]))
 
-    story.append(Spacer(1, 12 * mm))
-    signature = _image_from_b64(org.get("president_signature_base64"), 55, 18)
-    firma = [[Paragraph("Firma percettore", ParagraphStyle("fp", fontSize=10,
-                                                            alignment=TA_CENTER, fontName="Helvetica-Bold")),
-              signature if signature else Paragraph(" ", st["val"])],
-             ["", Paragraph("Il Presidente", ParagraphStyle("pr", fontSize=10,
-                                                              alignment=TA_CENTER, fontName="Helvetica-Bold"))],
-             ["", Paragraph(f"<i>{org.get('president_name', 'Drovetti Cassiano Bruno')}</i>",
-                              ParagraphStyle("pn", fontSize=10, alignment=TA_CENTER,
-                                              fontName="Helvetica-Oblique"))]]
-    fs = Table(firma, colWidths=[90 * mm, 90 * mm], rowHeights=[20 * mm, 5 * mm, 5 * mm])
-    fs.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
-                             ("LINEABOVE", (0, 1), (0, 1), 0.5, colors.black),
-                             ("LINEABOVE", (1, 1), (1, 1), 0.5, colors.black),
-                             ("TOPPADDING", (0, 1), (-1, 1), 4)]))
-    story.append(fs)
-    story.append(Spacer(1, 8 * mm))
-    story.append(Paragraph(_footer_text(org), st["center_small"]))
     doc.build(story)
     return buf.getvalue()
 

@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 11 full-stack test of the new release (multi-item abbonamenti, auto-ricevuta, admin edit/delete abbonamento, compensi da_erogare, 2-page busta paga PDF, extended verbale PDF, sidebar reorder, admin org toggle + secretary signature). Backend: new suite /app/backend/tests/iter11_test.py -> 29/29 PASS (also re-ran legacy backend_test.py -> 96/96 after retrying one flaky receipt-numbering test). Frontend: 3 Playwright runs covering login, sidebar DOM order, Admin org tab, abbonamenti multi-item create/edit/delete, ricevuta badge + genera-ricevuta + PDF download, compensi alert/columns/busta-paga download, verbali extended dialog + PDF, and navigation regression on all 11 routes. No blocking issues found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/organizzazione", "issue": "Default org document created by _load_org() does not include the keys 'secretary_signature_base64' and (originally) 'auto_ricevuta_abbonamento', so on a fresh DB the GET response omits secretary_signature_base64 until it is uploaded once. Add both keys (None/False) to the default doc for a stable contract."},
+      {"endpoint": "PATCH /api/organizzazione", "issue": "update_org() strips None values, so an uploaded logo/signature can never be cleared via the API (no way to unset president/secretary signature). Same for PATCH /api/verbali. Consider allowing explicit null to unset."},
+      {"endpoint": "POST /api/compensi/eroga", "issue": "Response returns only {ok, movimento} without the created compensi_erogati id, so the caller cannot deep-link to the busta-paga PDF (GET /api/compensi/erogati/{id}/pdf) without an extra list call. Returning the erogazione id would be cleaner."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Abbonamenti new/edit dialog", "issue": "Duplicate data-testid 'item-desc-{i}': rendered for the non-Lezioni Input (line ~715) and again for the Lezioni-branch Input (line ~725). Only one branch renders at a time so tests pass, but the duplicate id is fragile - rename one (e.g. item-desc-lez-{i}).", "selector": "[data-testid=\"item-desc-0\"]", "priority": "LOW"},
+      {"component": "All Dialogs (Abbonamenti/Verbali/Tesserati)", "issue": "React console warning: 'Missing Description or aria-describedby={undefined} for DialogContent' - a11y nit, add DialogDescription.", "selector": "[role=\"dialog\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/iter11_test.py",
+    "/app/backend/tests/cleanup_uitest.py",
+    "/app/test_reports/pytest/iter11.xml",
+    "/app/test_reports/pytest/iter11_regression.xml"
+  ],
+  "action_items": [
+    "Optional: include secretary_signature_base64 (None) and auto_ricevuta_abbonamento (False) in the default organizzazione document.",
+    "Optional: allow clearing logo/signatures via PATCH /api/organizzazione (currently None values are filtered out).",
+    "Optional: return the erogazione id from POST /api/compensi/eroga.",
+    "Optional: rename the duplicated data-testid 'item-desc-{i}' in Abbonamenti.jsx and add DialogDescription to dialogs."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1930 lines - consider splitting into routers (abbonamenti, ricevute, compensi, verbali) for maintainability.",
+    "create_abbonamento with auto-ricevuta creates ONE 'Ricevuta' movimento instead of one movimento per item category; per-category movimenti only happen when no ricevuta is generated. Verified behaviour is intentional (no double counting) but the requirement text says 'one movimento per category' - confirm expectation with the user.",
+    "Receipt numbering (_next_receipt_number) is contention-prone: parallel receipt creation caused a flaky number assertion in the legacy suite (counter decrement-on-delete-last logic). Consider a findOneAndUpdate atomic counter without decrement-on-delete."
+  ],
+  "updated_files": [
+    "/app/backend/tests/iter11_test.py (new)",
+    "/app/backend/tests/cleanup_uitest.py (new, test-data cleanup helper)"
+  ],
+  "success_rate": {"backend": "100% (29/29 new + 96/96 regression)", "frontend": "100% of executed flows"},
+  "seed_data_creation": "Temporary: tesserato TEST_Abb11 Multi, tecnico test_tec_iter11@wolfsmind.it (50%), TEST_ abbonamenti/ricevute/verbali and UITEST records from Playwright. All removed afterwards via fixtures + /app/backend/tests/cleanup_uitest.py. Org settings restored (auto_ricevuta_abbonamento=false, secretary_signature_base64=null).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@wolfsmind.it / Admin2026! (from /app/memory/test_credentials.md) - valid, login OK, bcrypt hash prefix $2b$ (60 chars), httpOnly access_token+refresh_token cookies set, brute-force lockout returns 429 after 5 fails (covered by backend_test.py::TestAuth).",
+  "context_for_next_testing_agent": "Verified in this iteration: sidebar DOM order exactly [nav-dashboard, nav-tesserati, nav-abbonamenti, nav-ricevute, nav-calendario, nav-libro-soci, nav-movimenti, nav-compensi, nav-verbali, nav-report(+nav-admin)]; org auto_ricevuta toggle persists both ON and OFF; secretary signature upload input present and PATCH persists base64; multi-item abbonamento creates 1 movimento per categoria (Lezioni/Quota associativa/Merchandising/Altro), recomputes prezzo (280) and num_lezioni_totali (10), sets tesserato.scadenza_tesseramento to data_acquisto+1y and never downgrades a newer date; crea_ricevuta=true and org toggle both create a linked ricevuta with correct numero + esclude_da_compensi=true for Quota/Merchandising; PATCH with only items recomputes prezzo; PATCH updates tesserato_id/data_acquisto/metodo_pagamento/lezioni_effettuate(delta); tecnico gets 403 on items/tesserato_id patch and on DELETE; DELETE removes abbonamento movimenti and unlinks (does not delete) the ricevuta; POST genera-ricevuta works once then 400; /api/compensi exposes gia_erogato/da_erogare = max(0, dovuto-erogato); busta paga PDF is exactly 2 pages (page1 has Drovetti Cassiano Bruno signature block, page2 'RIEPILOGO RICEVUTE'); verbale PDF contains sede/ora_inizio/ora_chiusura/partecipanti_remoti and drops the signature block when firme_abilitate=false. Note: report/bilancio returns {movimenti, totali:{entrate,uscite,saldo}} (not top-level totals). POST /api/compensi/eroga does not return the erogazione id - fetch it from GET /api/compensi/erogati. Run pytest serially (-n 0) when asserting receipt numbers. Backend logs contain pre-existing email 429 rate-limit warnings from earlier iterations (integration rate limit, not a code bug). CORS preflight is answered by the Cloudflare edge with '*', so app-level CORS_ORIGINS cannot be asserted from outside; cookie-based auth works in the browser.",
+  "rca_of_the_issue": "No application defects reproduced. The three initial test failures were test-side: (1) report/bilancio totals are nested under 'totali'; (2) busta paga page-2 heading is uppercase 'RIEPILOGO RICEVUTE'; (3) /compensi/eroga does not return an id. A single legacy failure (TestRicevutaNumerazione::test_delete_last_decrements_counter) is flaky under xdist because parallel tests consume receipt numbers concurrently; it passes 100% when run serially (-n 0)."
+}

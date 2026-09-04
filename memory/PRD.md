@@ -31,6 +31,17 @@ FastAPI + MongoDB + React 19 + Tailwind + Shadcn + reportlab (PDF) + Resend (ema
   - Modifica manuale del numero di lezioni effettuate (icona matita → PATCH /abbonamenti/{id} con delta salvato in `lezioni_manuali`)
   - Tab "Storico per cliente" con card raggruppate per tesserato e totali: lezioni acquistate, effettuate, residue, spesa totale
   - Espansione card cliente → dettaglio di tutti gli abbonamenti (attivi + esauriti) con badge stato
+- **Release rev 2 abbonamenti (2026-02)**:
+  - Sidebar riordinata: Tesserati → Abbonamenti → Ricevute → Calendario → Libro Soci → Libro Contabile → Compensi → Verbali → Report → Admin
+  - Abbonamento multi-voce con categorie (Lezioni / Quota associativa / Merchandising / Altro) → un movimento contabile per voce
+  - Se una voce è "Quota associativa" → aggiorna automaticamente `scadenza_tesseramento` del tesserato (+1 anno)
+  - Admin: toggle "Genera ricevuta automatica" (organizzazione.auto_ricevuta_abbonamento) + upload firma segretario
+  - Ogni abbonamento ha un badge "Ricevuta ✓ N.XXX" (link al PDF) o "Genera" (POST /abbonamenti/{aid}/genera-ricevuta)
+  - Admin può modificare tutti i campi ed eliminare (delete rimuove anche movimenti collegati)
+  - Compensi: card "Da compensare" + colonne Erogato / Da erogare + alert giallo evidenziato
+  - Busta paga PDF a 2 pagine: pag1 compenso+firme (segretario+presidente), pag2 riepilogo ricevute che hanno generato il compenso
+  - Verbali arricchiti: sede, ora_inizio, ora_chiusura, data_chiusura, partecipanti_remoti[], toggle firme_abilitate
+  - PWA install button con istruzioni PC dettagliate (Chrome/Edge/Brave: icona installa nell'URL o menu ⋮ → Installa app)
 
 ## Roadmap / Backlog
 - P2: WhatsApp Business API (invio automatico senza wa.me manuale)
