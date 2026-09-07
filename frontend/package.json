@@ -9,7 +9,7 @@
     "axios": "^1.7.2",
     "bootstrap": "^5.3.3",
     "chart.js": "^4.4.1",
-    "craco": "^0.1.4",
+    "@craco/craco": "^7.1.0",
     "craco-alias": "^3.0.1",
     "react": "^18.2.0",
     "react-bootstrap": "^2.10.2",
