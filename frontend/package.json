@@ -65,7 +65,7 @@
     "start": "craco start",
     "build": "CI=false craco build",
     "test": "craco test"
-     },"buildTrigger": "1"
+     },"buildTrigger": "1"}
 
   "browserslist": {
     "production": [
