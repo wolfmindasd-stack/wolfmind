@@ -42,16 +42,16 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard title={isTecnico ? "Tuoi tesserati" : "Tesserati totali"}
-          value={d.tesserati_count} icon={Users} testid="kpi-tesserati" />
+          value={d?.tesserati_count} icon={Users} testid="kpi-tesserati" />
         <KpiCard title={isTecnico ? "Tuoi abbonamenti" : "Abbonamenti"}
-          value={d.abbon_count} icon={Package} testid="kpi-abbonamenti" />
-        <KpiCard title="Ricevute del mese" value={d.ricevute_mese_count} icon={Receipt}
-          hint={fmtEur(d.incassato_mese) + " incassati"} testid="kpi-ricevute-mese" />
+          value={d?.abbon_count} icon={Package} testid="kpi-abbonamenti" />
+        <KpiCard title="Ricevute del mese" value={d?.ricevute_mese_count} icon={Receipt}
+          hint={fmtEur(d?.incassato_mese) + " incassati"} testid="kpi-ricevute-mese" />
         {isTecnico ? (
-          <KpiCard title="Compenso maturato" value={fmtEur(d.compenso_maturato || 0)}
+          <KpiCard title="Compenso maturato" value={fmtEur(d?.compenso_maturato || 0)}
             icon={Wallet} color="text-[#FFCC00]" testid="kpi-compenso" hint="Anno in corso" />
         ) : (
-          <KpiCard title="Entrate (anno)" value={fmtEur(d.entrate_anno)} icon={TrendingUp}
+          <KpiCard title="Entrate (anno)" value={fmtEur(d?.entrate_anno)} icon={TrendingUp}
             color="text-[#34C759]" testid="kpi-entrate" />
         )}
       </div>
@@ -69,9 +69,9 @@ export default function Dashboard() {
           {!isTecnico && (
             <div className="mt-4 pt-4 border-t border-white/10 space-y-1">
               <div className="flex justify-between text-sm"><span className="text-white/50">Entrate</span>
-                <span className="text-[#34C759] font-semibold">{fmtEur(d.entrate_anno)}</span></div>
+                <span className="text-[#34C759] font-semibold">{fmtEur(d?.entrate_anno)}</span></div>
               <div className="flex justify-between text-sm"><span className="text-white/50">Uscite</span>
-                <span className="text-[#FF3B30] font-semibold">{fmtEur(d.uscite_anno)}</span></div>
+                <span className="text-[#FF3B30] font-semibold">{fmtEur(d?.uscite_anno)}</span></div>
             </div>
           )}
         </div>
@@ -86,7 +86,7 @@ export default function Dashboard() {
               Vai ai tesserati →
             </Link>
           </div>
-          {Array.isArray(d?.scadenze_imminenti) && d.scadenze_imminenti.length === 0 && (
+          {Array.isArray(d?.scadenze_imminenti) && d?.scadenze_imminenti.length === 0 && (
             <div className="text-white/50 text-sm py-4">Nessuna scadenza nei prossimi 30 giorni.</div>
           )}
           <div className="space-y-2">
