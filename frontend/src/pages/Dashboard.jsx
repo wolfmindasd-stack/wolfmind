@@ -86,11 +86,12 @@ export default function Dashboard() {
               Vai ai tesserati →
             </Link>
           </div>
-          { d?.scadenze_imminenti?.length === 0 && (
+          {Array.isArray(d?.scadenze_imminenti) && d.scadenze_imminenti.length === 0 && (
             <div className="text-white/50 text-sm py-4">Nessuna scadenza nei prossimi 30 giorni.</div>
           )}
           <div className="space-y-2">
-            { d?.scadenze_imminenti?.slice(0, 6)?.map((t) => (
+            {Array.isArray(d?.scadenze_imminenti) &&
+  d.scadenze_imminenti.slice(0, 6).map((t) => (
               <div key={t.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
                 <div>
                   <div className="font-medium">{t.cognome} {t.nome}</div>
