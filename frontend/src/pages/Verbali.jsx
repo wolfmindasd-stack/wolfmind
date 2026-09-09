@@ -152,7 +152,7 @@ export default function Verbali() {
                 </td>
               </tr>
             ))}
-            {list.length === 0 && (
+            {Array.isArray(list) && list.length === 0 && (
               <tr><td colSpan={5} className="p-8 text-center text-white/40">Nessun verbale</td></tr>
             )}
           </tbody>
