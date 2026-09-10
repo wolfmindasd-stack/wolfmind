@@ -27,7 +27,8 @@
     "@radix-ui/react-label": "^2.0.1",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-select": "^1.0.5",
-    "@radix-ui/react-switch": "^1.0.3"
+    "@radix-ui/react-switch": "^1.0.3",
+    "@radix-ui/react-tabs": "^1.0.3"
   },
   "scripts": {
     "start": "craco start",
