@@ -1,34 +1,22 @@
+// frontend/src/lib/api.js
 import axios from "axios";
-
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-export const API = `${BACKEND_URL}/api`;
+import { API_URL } from "../config";
 
 export const api = axios.create({
-  baseURL: API,
+  baseURL: API_URL,
   withCredentials: true,
 });
 
-export function formatApiErrorDetail(detail) {
-  if (detail == null) return "Errore imprevisto. Riprova.";
-  if (typeof detail === "string") return detail;
-  if (Array.isArray(detail))
-    return detail.map((e) => (e && typeof e.msg === "string" ? e.msg : JSON.stringify(e))).join(" ");
-  if (detail && typeof detail.msg === "string") return detail.msg;
-  return String(detail);
+// Formattazioni di utilità (mantieni quelle che avevi)
+export function fmtEur(value) {
+  return new Intl.NumberFormat("it-IT", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 2,
+  }).format(value ?? 0);
 }
 
-export const fmtEur = (v) => {
-  const n = Number(v || 0);
-  return n.toLocaleString("it-IT", { style: "currency", currency: "EUR" });
-};
-
-export const fmtDate = (iso) => {
-  if (!iso) return "-";
-  try {
-    return new Date(iso).toLocaleDateString("it-IT");
-  } catch {
-    return iso;
-  }
-};
-
-export const todayIso = () => new Date().toISOString().slice(0, 10);
+export function fmtDate(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("it-IT").format(new Date(value));
+}
