@@ -19,16 +19,18 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [d, setD] = useState(null);
 
+  // 🔄 Carica i dati SEMPRE, anche se user è null
+  useEffect(() => {
+    if (!user) return; // <-- controllo spostato QUI
+    api.get("/dashboard")
+      .then((r) => setD(r.data))
+      .catch(() => {});
+  }, [user]);
+
   // 🔒 BLOCCA LA DASHBOARD SE NON C’È LOGIN
   if (!user) {
     return <Navigate to="/login" />;
   }
-
-  useEffect(() => {
-    api.get("/dashboard")
-      .then((r) => setD(r.data))
-      .catch(() => {});
-  }, []);
 
   // 🔒 BLOCCA TUTTO FINCHÉ I DATI NON SONO PRONTI
   if (!d) {
