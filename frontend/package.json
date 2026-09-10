@@ -29,7 +29,8 @@
     "@radix-ui/react-select": "^1.0.5",
     "@radix-ui/react-switch": "^1.0.3",
     "@radix-ui/react-tabs": "^1.0.3",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss-animate": "^1.0.7",
+    "@tailwindcss/postcss": "^4.0.0"
   },
   "scripts": {
     "start": "craco start",
