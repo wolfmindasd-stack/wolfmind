@@ -32,3 +32,22 @@ export function fmtDate(value) {
 export function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
+
+// Formatta errori API in modo leggibile
+export function formatApiErrorDetail(err) {
+  try {
+    // FastAPI error format: { detail: "messaggio" }
+    if (err?.response?.data?.detail) {
+      return err.response.data.detail;
+    }
+
+    // Axios network errors
+    if (err?.message) {
+      return err.message;
+    }
+
+    return "Errore sconosciuto";
+  } catch {
+    return "Errore sconosciuto";
+  }
+}
