@@ -24,7 +24,8 @@
     "lucide-react": "^0.379.0",
     "class-variance-authority": "^0.7.0",
     "tailwind-merge": "^1.14.0",
-    "@radix-ui/react-label": "^2.0.1"
+    "@radix-ui/react-label": "^2.0.1",
+    "@radix-ui/react-dialog": "^1.0.5"
   },
   "scripts": {
     "start": "craco start",
