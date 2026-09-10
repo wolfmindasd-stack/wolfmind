@@ -9,6 +9,9 @@ export const api = axios.create({
   withCredentials: true,
 });
 
+// Alias per retrocompatibilità (vecchi componenti usano "API")
+export const API = api;
+
 // =========================
 // FUNZIONI DI UTILITÀ
 // =========================
@@ -36,16 +39,12 @@ export function todayIso() {
 // Formatta errori API in modo leggibile
 export function formatApiErrorDetail(err) {
   try {
-    // FastAPI error format: { detail: "messaggio" }
     if (err?.response?.data?.detail) {
       return err.response.data.detail;
     }
-
-    // Axios network errors
     if (err?.message) {
       return err.message;
     }
-
     return "Errore sconosciuto";
   } catch {
     return "Errore sconosciuto";
