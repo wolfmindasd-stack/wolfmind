@@ -13,6 +13,17 @@ export const api = axios.create({
 export const API = api;
 
 // =========================
+// INTERCEPTOR: aggiunge il token JWT
+// =========================
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem("token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// =========================
 // FUNZIONI DI UTILITÀ
 // =========================
 
